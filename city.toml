@@ -2,7 +2,6 @@
 name = "SafetyChain"
 prefix = "hq"
 provider = "claude"
-suspended = true
 global_fragments = ["command-glossary", "operational-awareness"]
 includes = [".gc/system/packs/gastown"]
 default_rig_includes = [".gc/system/packs/gastown"]
@@ -10,15 +9,17 @@ default_rig_includes = [".gc/system/packs/gastown"]
 [[rigs]]
 name = "enterprise"
 path = "/Users/caseyboyle/src/SafetyChain/enterprise"
+git_url = "https://github.com/safety-chain/enterprise"
+default_branch = "boylec/develop"
 prefix = "sc"
-suspended = true
 includes = [".gc/system/packs/gastown"]
 
 [[rigs]]
 name = "designsystem"
 path = "/Users/caseyboyle/src/SafetyChain/design-system"
+git_url = "https://github.com/safety-chain/design-system"
+default_branch = "boylec/develop"
 prefix = "de"
-suspended = true
 includes = [".gc/system/packs/gastown"]
 
 [daemon]
