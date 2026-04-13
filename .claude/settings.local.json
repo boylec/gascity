@@ -79,7 +79,13 @@
       "Bash(kill 29876)",
       "Bash(chmod 700:*)",
       "Bash(bd config:*)",
-      "Bash(kill 43448)"
+      "Bash(kill 43448)",
+      "Bash(tmux ls:*)",
+      "Bash(tmux -L gas-city ls)",
+      "Bash(tmux -L gascity ls)",
+      "Bash(tmux -L gc ls)",
+      "Bash(grep -E \"^attach-session$|^switch-client$|^new-session$|GC_SESSION|GC_TMUX\")",
+      "Bash(tmux:*)"
     ]
   }
 }

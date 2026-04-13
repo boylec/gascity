@@ -1,1 +1,1 @@
-/Users/caseyboyle/src/SafetyChain/.gc/system/packs/maintenance/scripts/orphan-sweep.sh
+/Users/caseyboyle/src/SafetyChain/gas-city/.gc/system/packs/maintenance/scripts/orphan-sweep.sh

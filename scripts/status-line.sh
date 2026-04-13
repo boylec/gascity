@@ -1,1 +1,1 @@
-/Users/caseyboyle/src/SafetyChain/.gc/system/packs/gastown/scripts/status-line.sh
+/Users/caseyboyle/src/SafetyChain/gas-city/.gc/system/packs/gastown/scripts/status-line.sh

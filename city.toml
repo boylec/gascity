@@ -9,19 +9,14 @@ default_rig_includes = [".gc/system/packs/gastown"]
 [[rigs]]
 name = "enterprise"
 path = "../enterprise"
-git_url = "https://github.com/safety-chain/enterprise"
-# Resolved at runtime: $(gh api user -q .login)/develop
-default_branch = "${GH_USER}/develop"
 prefix = "sc"
 includes = [".gc/system/packs/gastown"]
 
 [[rigs]]
 name = "designsystem"
 path = "../design-system"
-git_url = "https://github.com/safety-chain/design-system"
-# Resolved at runtime: $(gh api user -q .login)/develop
-default_branch = "${GH_USER}/develop"
 prefix = "de"
+suspended = true
 includes = [".gc/system/packs/gastown"]
 
 [daemon]

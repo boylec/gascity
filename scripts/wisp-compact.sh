@@ -1,1 +1,1 @@
-/Users/caseyboyle/src/SafetyChain/.gc/system/packs/maintenance/scripts/wisp-compact.sh
+/Users/caseyboyle/src/SafetyChain/gas-city/.gc/system/packs/maintenance/scripts/wisp-compact.sh

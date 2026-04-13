@@ -1,1 +1,1 @@
-/Users/caseyboyle/src/SafetyChain/.gc/system/packs/maintenance/scripts/cross-rig-deps.sh
+/Users/caseyboyle/src/SafetyChain/gas-city/.gc/system/packs/maintenance/scripts/cross-rig-deps.sh
