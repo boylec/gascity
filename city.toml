@@ -10,7 +10,8 @@ default_rig_includes = [".gc/system/packs/gastown"]
 name = "enterprise"
 path = "/Users/caseyboyle/src/SafetyChain/enterprise"
 git_url = "https://github.com/safety-chain/enterprise"
-default_branch = "boylec/develop"
+# Resolved at runtime: $(gh api user -q .login)/develop
+default_branch = "${GH_USER}/develop"
 prefix = "sc"
 includes = [".gc/system/packs/gastown"]
 
@@ -18,7 +19,8 @@ includes = [".gc/system/packs/gastown"]
 name = "designsystem"
 path = "/Users/caseyboyle/src/SafetyChain/design-system"
 git_url = "https://github.com/safety-chain/design-system"
-default_branch = "boylec/develop"
+# Resolved at runtime: $(gh api user -q .login)/develop
+default_branch = "${GH_USER}/develop"
 prefix = "de"
 includes = [".gc/system/packs/gastown"]
 
