@@ -1,0 +1,28 @@
+[workspace]
+name = "SafetyChain"
+prefix = "hq"
+provider = "claude"
+suspended = true
+global_fragments = ["command-glossary", "operational-awareness"]
+includes = [".gc/system/packs/gastown"]
+default_rig_includes = [".gc/system/packs/gastown"]
+
+[[rigs]]
+name = "enterprise"
+path = "/Users/caseyboyle/src/SafetyChain/enterprise"
+prefix = "sc"
+suspended = true
+includes = [".gc/system/packs/gastown"]
+
+[[rigs]]
+name = "designsystem"
+path = "/Users/caseyboyle/src/SafetyChain/design-system"
+prefix = "de"
+suspended = true
+includes = [".gc/system/packs/gastown"]
+
+[daemon]
+patrol_interval = "30s"
+max_restarts = 5
+restart_window = "1h"
+shutdown_timeout = "5s"

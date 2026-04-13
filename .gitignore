@@ -1,0 +1,10 @@
+# Gas City
+.gc/
+.beads/
+hooks/
+.runtime/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key

@@ -1,0 +1,1 @@
+/Users/caseyboyle/src/SafetyChain/.gc/system/packs/maintenance/scripts/prune-branches.sh
