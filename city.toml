@@ -6,9 +6,6 @@ global_fragments = ["command-glossary", "operational-awareness"]
 includes = [".gc/system/packs/gastown"]
 default_rig_includes = [".gc/system/packs/gastown"]
 
-[providers.claude]
-option_defaults = { permission_mode = "unrestricted" }
-
 [[rigs]]
 name = "enterprise"
 path = "../enterprise"
@@ -27,3 +24,6 @@ patrol_interval = "30s"
 max_restarts = 5
 restart_window = "1h"
 shutdown_timeout = "5s"
+
+[session]
+startup_timeout = "180s"
