@@ -85,7 +85,18 @@
       "Bash(tmux -L gascity ls)",
       "Bash(tmux -L gc ls)",
       "Bash(grep -E \"^attach-session$|^switch-client$|^new-session$|GC_SESSION|GC_TMUX\")",
-      "Bash(tmux:*)"
+      "Bash(tmux:*)",
+      "Bash(gh search:*)",
+      "Bash(gh api:*)",
+      "Bash(fnm env:*)",
+      "Bash(ls -la /Users/caseyboyle/src/SafetyChain/gas-city/.gc/*.json)",
+      "Bash(ls -la /Users/caseyboyle/src/SafetyChain/gas-city/.gc/*.pid)",
+      "Read(//Users/caseyboyle/Library/LaunchAgents/**)",
+      "Bash(launchctl list *)",
+      "Bash(ls -la /Users/caseyboyle/src/SafetyChain/gas-city/.gc/supervisor.*)",
+      "Bash(ls -la ~/.gc/supervisor.*)",
+      "Bash(ls -la /Users/caseyboyle/src/SafetyChain/gas-city/supervisor.*)",
+      "Bash(env)"
     ]
   }
 }

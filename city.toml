@@ -2,7 +2,7 @@
 name = "SafetyChain"
 prefix = "hq"
 provider = "claude"
-global_fragments = ["command-glossary", "operational-awareness"]
+global_fragments = ["command-glossary", "operational-awareness", "linear-transitions"]
 includes = [".gc/system/packs/gastown"]
 default_rig_includes = [".gc/system/packs/gastown"]
 
