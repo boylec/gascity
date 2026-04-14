@@ -2,7 +2,7 @@
 name = "SafetyChain"
 prefix = "hq"
 provider = "claude"
-global_fragments = ["command-glossary", "operational-awareness", "linear-transitions"]
+global_fragments = ["command-glossary", "operational-awareness", "linear-transitions", "target-branch-override"]
 includes = [".gc/system/packs/gastown"]
 default_rig_includes = [".gc/system/packs/gastown"]
 
@@ -14,6 +14,16 @@ name = "enterprise"
 path = "../enterprise"
 prefix = "sc"
 includes = [".gc/system/packs/gastown"]
+
+[[rigs.overrides]]
+agent = "polecat"
+[rigs.overrides.env]
+GC_TARGET_BRANCH = "boylec/develop"
+
+[[rigs.overrides]]
+agent = "refinery"
+[rigs.overrides.env]
+GC_TARGET_BRANCH = "boylec/develop"
 
 [[rigs]]
 name = "designsystem"
