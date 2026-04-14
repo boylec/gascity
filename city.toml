@@ -6,6 +6,9 @@ global_fragments = ["command-glossary", "operational-awareness", "linear-transit
 includes = [".gc/system/packs/gastown"]
 default_rig_includes = [".gc/system/packs/gastown"]
 
+[providers.claude]
+option_defaults = { permission_mode = "unrestricted" }
+
 [[rigs]]
 name = "enterprise"
 path = "../enterprise"
