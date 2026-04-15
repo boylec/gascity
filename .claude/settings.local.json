@@ -96,7 +96,8 @@
       "Bash(ls -la /Users/caseyboyle/src/SafetyChain/gas-city/.gc/supervisor.*)",
       "Bash(ls -la ~/.gc/supervisor.*)",
       "Bash(ls -la /Users/caseyboyle/src/SafetyChain/gas-city/supervisor.*)",
-      "Bash(env)"
+      "Bash(env)",
+      "Bash(bash -n /Users/cboyle/src/gas-city/bootstrap.sh)"
     ]
   }
 }

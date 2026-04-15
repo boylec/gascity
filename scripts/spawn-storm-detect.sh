@@ -1,1 +1,1 @@
-/Users/caseyboyle/src/SafetyChain/gas-city/.gc/system/packs/maintenance/scripts/spawn-storm-detect.sh
+/Users/cboyle/src/gas-city/.gc/system/packs/maintenance/scripts/spawn-storm-detect.sh

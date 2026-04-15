@@ -1,1 +1,1 @@
-/Users/caseyboyle/src/SafetyChain/gas-city/.gc/system/packs/gastown/scripts/tmux-keybindings.sh
+/Users/cboyle/src/gas-city/.gc/system/packs/gastown/scripts/tmux-keybindings.sh
