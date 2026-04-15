@@ -370,6 +370,46 @@ which is authoritative before proceeding:
 
 ---
 
+## Phase 3b: Patch Formula Errata
+
+The installed gastown pack formulas may have known issues that need patching.
+Apply these fixes to `.gc/system/packs/gastown/formulas/` after `gc start`
+generates the pack directory.
+
+### Refinery: remote branch cleanup after merge
+
+The refinery merge-push step's cleanup block must have the remote branch
+delete in a proper bash code block. Without this, the refinery skips
+deleting merged polecat branches from origin, leaving stale remote refs.
+
+**File:** `.gc/system/packs/gastown/formulas/mol-refinery-patrol.formula.toml`
+
+Find the direct-mode cleanup block (step 4 in merge-push). It should read:
+
+```
+**4. Cleanup:**
+```bash
+git branch -d temp
+if [ "{{delete_merged_branches}}" = "true" ]; then
+  git push origin --delete "$BRANCH" || echo "WARNING: failed to delete remote branch $BRANCH"
+fi
+```
+```
+
+If instead it reads as a prose conditional like:
+```
+If delete_merged_branches = "true": `git push origin --delete $BRANCH`
+```
+
+Replace the cleanup block so the `git push origin --delete` is inside the
+bash code fence. The refinery agent interprets code blocks reliably but may
+skip prose conditionals.
+
+**Verify:** `grep -A4 'git branch -d temp' .gc/system/packs/gastown/formulas/mol-refinery-patrol.formula.toml`
+should show the `if` block, not a prose line.
+
+---
+
 ## Phase 4: Start the City
 
 ```bash
