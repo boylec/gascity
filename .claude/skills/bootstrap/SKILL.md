@@ -257,6 +257,34 @@ issue-prefix: sc
 dolt.auto-start: false
 ```
 
+### 2e-post. Set issue_prefix in beads database config
+
+**CRITICAL:** The `.beads/config.yaml` file and the beads **database**
+config (`bd config`) are separate. The database config controls which
+prefix `bd create` uses when minting new bead IDs. If this is wrong,
+every new session bead and wisp gets the wrong prefix.
+
+From the city root:
+```bash
+gc bd config set issue_prefix hq
+```
+
+From the enterprise rig:
+```bash
+gc bd --db ../enterprise/.beads config set issue_prefix sc
+```
+
+**Verify both:**
+```bash
+gc bd config get issue_prefix          # should print: hq
+gc bd --db ../enterprise/.beads config get issue_prefix  # should print: sc
+```
+
+If the designsystem rig is initialized:
+```bash
+gc bd --db ../design-system/.beads config set issue_prefix de
+```
+
 ### 2f. Initialize beads in design-system (prefix de)
 
 Same pattern with `--prefix de`. Configure routes pointing back to siblings.
@@ -509,18 +537,46 @@ bd update <bead-id> --assignee ""
 
 ### Session prefix mismatch
 
-**Symptom:** Enterprise sessions get `de-` prefix (designsystem) instead of
-`sc-` (enterprise).
+**Symptom:** Sessions or wisps get the wrong prefix (e.g., `de-` for
+enterprise sessions that should be `sc-`).
 
-**Root cause:** Sessions created before prefix config was correct retain
-their original IDs.
+**Root cause:** The beads **database** config (`bd config get issue_prefix`)
+was set to the wrong prefix. The `.beads/config.yaml` file and the database
+config are separate — both must agree. New beads (including session beads)
+use the database config value, not the YAML file.
 
-**Fix:** Close stale sessions and let the reconciler create fresh ones:
+**Diagnose:**
 ```bash
-gc session close <de-prefixed-session-id>
+gc bd config get issue_prefix                            # city — should be: hq
+gc bd --db ../enterprise/.beads config get issue_prefix  # enterprise — should be: sc
 ```
 
-New sessions will use the correct rig prefix.
+**Fix the prefix config:**
+```bash
+gc bd config set issue_prefix hq
+gc bd --db ../enterprise/.beads config set issue_prefix sc
+```
+
+**Fix existing wrongly-prefixed session beads:**
+
+`gc session close` will NOT work on config-managed always-on sessions.
+Instead, stop the city, close the beads directly, and rename or recreate:
+
+```bash
+gc stop
+
+# Option A: Rename existing beads (preserves history)
+gc bd rename de-abc hq-abc   # city agents → hq prefix
+gc bd rename de-xyz sc-xyz   # enterprise agents → sc prefix
+
+# Option B: Close beads and let controller create fresh ones
+gc bd close de-abc de-xyz
+
+gc start
+```
+
+After restart, verify with `gc session list` that all session IDs use the
+correct prefix for their rig.
 
 ### Refinery stuck at permission prompts
 
