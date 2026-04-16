@@ -15,6 +15,13 @@ path = "../enterprise"
 prefix = "sc"
 includes = [".gc/system/packs/gastown"]
 
+[[rigs]]
+name = "designsystem"
+path = "../design-system"
+prefix = "de"
+suspended = true
+includes = [".gc/system/packs/gastown"]
+
 [[rigs.overrides]]
 agent = "polecat"
 [rigs.overrides.env]
@@ -22,15 +29,9 @@ GC_TARGET_BRANCH = "boylec/develop"
 
 [[rigs.overrides]]
 agent = "refinery"
+
 [rigs.overrides.env]
 GC_TARGET_BRANCH = "boylec/develop"
-
-[[rigs]]
-name = "designsystem"
-path = "../design-system"
-prefix = "de"
-suspended = true
-includes = [".gc/system/packs/gastown"]
 
 [daemon]
 patrol_interval = "30s"
