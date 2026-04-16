@@ -1,0 +1,6 @@
+[order]
+description = "SafetyChain: reconcile closed convoys with Linear 'In Review' state. Safety net for any in-formula transitions that failed or were skipped."
+formula = "mol-sc-linear-sync"
+gate = "cooldown"
+interval = "10m"
+pool = "dog"

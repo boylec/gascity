@@ -1,0 +1,11 @@
+# Taplo TOML language server config — provides intellisense for city.toml
+# Schema source: github.com/gastownhall/gascity @ 73f09dd
+
+[schema]
+enabled = true
+
+[[rule]]
+keys = ["city.toml"]
+
+[rule.schema]
+path = "docs/schema/city-schema.json"

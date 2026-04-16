@@ -2,25 +2,28 @@
 name = "SafetyChain"
 prefix = "hq"
 provider = "claude"
-global_fragments = ["command-glossary", "operational-awareness", "linear-transitions", "target-branch-override"]
-includes = [".gc/system/packs/gastown"]
-default_rig_includes = [".gc/system/packs/gastown"]
+global_fragments = ["command-glossary", "operational-awareness", "linear-transitions", "target-branch-override", "sc-policy"]
+includes = [".gc/system/packs/gastown", "packs/safetychain"]
 
 [providers.claude]
 option_defaults = { permission_mode = "unrestricted" }
+
+# SafetyChain Claude provider presets — bind Claude CLI flags per variant.
+# Polecat variants (defined in packs/safetychain) are bound to these presets.
+[providers.claude-sonnet]
+option_defaults = { model = "sonnet", effort = "medium", permission_mode = "unrestricted" }
+
+[providers.claude-opus-high]
+option_defaults = { model = "opus", effort = "high", permission_mode = "unrestricted" }
+
+[providers.claude-opus-max-1m]
+option_defaults = { model = "opus[1m]", effort = "max", permission_mode = "unrestricted" }
 
 [[rigs]]
 name = "enterprise"
 path = "../enterprise"
 prefix = "sc"
-includes = [".gc/system/packs/gastown"]
-
-[[rigs]]
-name = "designsystem"
-path = "../design-system"
-prefix = "de"
-suspended = true
-includes = [".gc/system/packs/gastown"]
+includes = [".gc/system/packs/gastown", "packs/safetychain"]
 
 [[rigs.overrides]]
 agent = "polecat"
@@ -28,10 +31,31 @@ agent = "polecat"
 GC_TARGET_BRANCH = "boylec/develop"
 
 [[rigs.overrides]]
-agent = "refinery"
-
+agent = "polecat-sonnet"
 [rigs.overrides.env]
 GC_TARGET_BRANCH = "boylec/develop"
+
+[[rigs.overrides]]
+agent = "polecat-opus-high"
+[rigs.overrides.env]
+GC_TARGET_BRANCH = "boylec/develop"
+
+[[rigs.overrides]]
+agent = "polecat-opus-max-1m"
+[rigs.overrides.env]
+GC_TARGET_BRANCH = "boylec/develop"
+
+[[rigs.overrides]]
+agent = "refinery"
+[rigs.overrides.env]
+GC_TARGET_BRANCH = "boylec/develop"
+
+[[rigs]]
+name = "designsystem"
+path = "../design-system"
+prefix = "de"
+suspended = true
+includes = [".gc/system/packs/gastown", "packs/safetychain"]
 
 [daemon]
 patrol_interval = "30s"

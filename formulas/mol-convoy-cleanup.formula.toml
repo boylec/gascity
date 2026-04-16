@@ -197,6 +197,66 @@ or retire the dog if pool is oversized.
 
 **Exit criteria:** Deacon notified, dog ready for next work or retirement."""
 
+[[steps]]
+id = "sc-linear-transition"
+title = "Transition Linear to In Review when convoy has linear_id"
+needs = ["archive-convoy"]
+description = '''
+SafetyChain-specific: if the convoy is linked to a Linear issue (via
+metadata.linear_id set at create-beads time), transition the Linear issue
+to "In Review" now that all tracked work is closed. No-op otherwise.
+
+Runs in parallel with notify-overseer and return-to-kennel. Failure here
+does not block convoy cleanup — the scheduled mol-sc-linear-sync order
+(Phase 7) acts as a safety net for any misses.
+
+**1. Read the linkage.**
+
+```bash
+LINEAR_ID=$(bd show {{convoy}} --json | jq -r '.[0].metadata.linear_id // ""')
+if [ -z "$LINEAR_ID" ]; then
+  echo "No linear_id on convoy {{convoy}}; skipping Linear transition."
+  exit 0
+fi
+```
+
+**2. Transition Linear via MCP.**
+
+```
+mcp: linear-server -> save_issue
+  id: $LINEAR_ID
+  state: "In Review"
+```
+
+If the MCP call fails (auth, network, rate-limit), do NOT retry inside
+this step. Log the failure, mail the human, and let the linear-sync
+reconciliation order pick it up later:
+
+```bash
+"$GC_CITY_DIR/scripts/sc-notify-human.sh" \
+  "Linear transition failed: $LINEAR_ID" \
+  "Convoy {{convoy}} closed but save_issue state=In Review returned an error. linear-sync will retry within 10 minutes."
+```
+
+**3. Record the transition on the convoy for auditing.**
+
+```bash
+bd note {{convoy}} "Linear $LINEAR_ID transitioned to In Review on convoy close."
+```
+
+**4. Notify Casey (separate from notify-overseer because that mail is
+targeted at mayor, not human).**
+
+```bash
+"$GC_CITY_DIR/scripts/sc-notify-human.sh" \
+  "SAF-${LINEAR_ID#SAF-} -> In Review" \
+  "Convoy {{convoy}} closed. Linear $LINEAR_ID transitioned to In Review."
+```
+
+**Exit criteria:** If linear_id present, Linear state is "In Review" (or
+safety-net order is queued to retry). No-op if linear_id absent.
+'''
+
 [vars]
 [vars.convoy]
 description = "The convoy ID to archive"

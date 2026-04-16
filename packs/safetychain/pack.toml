@@ -1,0 +1,70 @@
+# SafetyChain local pack — adds polecat variants bound to named Claude
+# provider presets (defined in city.toml). Shared prompt + overlay + scripts
+# come from gastown via relative paths. This pack is rig-scoped only.
+
+[pack]
+name = "safetychain"
+schema = 1
+
+[formulas]
+dir = "formulas"
+
+# Polecat variants differ only by provider preset + pool size. Everything
+# else mirrors gastown/polecat (prompt template, overlay, worktree setup,
+# session theming, namepool).
+[[agent]]
+name = "polecat-sonnet"
+scope = "rig"
+provider = "claude-sonnet"
+wake_mode = "fresh"
+work_dir = ".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"
+prompt_template = "../../.gc/system/packs/gastown/prompts/polecat.md.tmpl"
+nudge = "Run gc hook; it checks assigned work first, then routed pool work."
+overlay_dir = "../../.gc/system/packs/gastown/overlays/default"
+pre_start = ["{{.ConfigDir}}/.gc/system/packs/gastown/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+idle_timeout = "2h"
+session_live = [
+    "{{.ConfigDir}}/.gc/system/packs/gastown/scripts/tmux-theme.sh {{.Session}} {{.Agent}} {{.ConfigDir}}",
+    "{{.ConfigDir}}/.gc/system/packs/gastown/scripts/tmux-keybindings.sh {{.ConfigDir}}",
+]
+min_active_sessions = 0
+max_active_sessions = 5
+namepool = "../../.gc/system/packs/gastown/namepools/mad-max.txt"
+
+[[agent]]
+name = "polecat-opus-high"
+scope = "rig"
+provider = "claude-opus-high"
+wake_mode = "fresh"
+work_dir = ".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"
+prompt_template = "../../.gc/system/packs/gastown/prompts/polecat.md.tmpl"
+nudge = "Run gc hook; it checks assigned work first, then routed pool work."
+overlay_dir = "../../.gc/system/packs/gastown/overlays/default"
+pre_start = ["{{.ConfigDir}}/.gc/system/packs/gastown/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+idle_timeout = "2h"
+session_live = [
+    "{{.ConfigDir}}/.gc/system/packs/gastown/scripts/tmux-theme.sh {{.Session}} {{.Agent}} {{.ConfigDir}}",
+    "{{.ConfigDir}}/.gc/system/packs/gastown/scripts/tmux-keybindings.sh {{.ConfigDir}}",
+]
+min_active_sessions = 0
+max_active_sessions = 3
+namepool = "../../.gc/system/packs/gastown/namepools/mad-max.txt"
+
+[[agent]]
+name = "polecat-opus-max-1m"
+scope = "rig"
+provider = "claude-opus-max-1m"
+wake_mode = "fresh"
+work_dir = ".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"
+prompt_template = "../../.gc/system/packs/gastown/prompts/polecat.md.tmpl"
+nudge = "Run gc hook; it checks assigned work first, then routed pool work."
+overlay_dir = "../../.gc/system/packs/gastown/overlays/default"
+pre_start = ["{{.ConfigDir}}/.gc/system/packs/gastown/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+idle_timeout = "2h"
+session_live = [
+    "{{.ConfigDir}}/.gc/system/packs/gastown/scripts/tmux-theme.sh {{.Session}} {{.Agent}} {{.ConfigDir}}",
+    "{{.ConfigDir}}/.gc/system/packs/gastown/scripts/tmux-keybindings.sh {{.ConfigDir}}",
+]
+min_active_sessions = 0
+max_active_sessions = 2
+namepool = "../../.gc/system/packs/gastown/namepools/mad-max.txt"

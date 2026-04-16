@@ -1,0 +1,166 @@
+description = '''
+SafetyChain convoy dispatch formula. Walks every open child of a convoy,
+classifies each bead by complexity (trivial / sonnet-default / opus-high),
+and slings it to the matching polecat variant with
+mol-polecat-work-monorepo. Resume-safe: skips beads already in_progress.
+
+Use this instead of the ad-hoc inline walk from sc-policy.md.tmpl when the
+convoy has more than a handful of beads, or when you want an auditable
+dispatch log. The ad-hoc walk stays valid for one-off slings.
+
+## Variables
+
+| Variable   | Source | Description                                 |
+|------------|--------|---------------------------------------------|
+| convoy_id  | caller | Convoy bead ID to dispatch                  |
+| rig        | caller | Target rig (default: $GC_RIG at runtime)    |
+'''
+formula = "mol-sc-sling-convoy"
+version = 1
+
+[vars]
+[vars.convoy_id]
+description = "Convoy bead ID to dispatch"
+required = true
+
+[vars.rig]
+description = "Target rig name (default: $GC_RIG at runtime)"
+default = ""
+
+[[steps]]
+id = "resolve-rig"
+title = "Resolve target rig and fetch open convoy children"
+description = '''
+Determine which rig to sling into and snapshot the open children of the
+convoy for classification.
+
+```bash
+RIG="{{rig}}"
+if [ -z "$RIG" ]; then
+  RIG="$GC_RIG"
+fi
+if [ -z "$RIG" ]; then
+  echo "No rig specified and GC_RIG not set. Pass --var rig=<name>." >&2
+  exit 1
+fi
+
+mkdir -p ".convoy-logs/{{convoy_id}}"
+bd list --parent "{{convoy_id}}" --status=open --json \
+  > ".convoy-logs/{{convoy_id}}/open-children.json"
+
+COUNT=$(jq length ".convoy-logs/{{convoy_id}}/open-children.json")
+echo "Dispatching $COUNT open children of convoy {{convoy_id}} into $RIG"
+```
+
+Exit criteria: `.convoy-logs/{{convoy_id}}/open-children.json` written,
+rig variable set for the next step.
+'''
+
+[[steps]]
+id = "classify-and-sling"
+title = "Classify each child and sling to the right polecat variant"
+needs = ["resolve-rig"]
+description = '''
+For each open child bead, inspect title + description, classify complexity,
+and sling to the matching polecat variant with metadata.trivial attached
+so the polecat knows whether to invoke the ralph-loop plugin skill.
+
+Resume safety: beads already in `in_progress` are skipped (assume another
+polecat has them). The log appends rather than overwrites, so re-running
+after a crash is safe.
+
+```bash
+RIG="{{rig}}"; [ -z "$RIG" ] && RIG="$GC_RIG"
+LOG=".convoy-logs/{{convoy_id}}/dispatch.tsv"
+
+# TSV header on first run
+if [ ! -s "$LOG" ]; then
+  printf 'bead_id\tvariant\ttrivial\tformula\tslung_at\n' > "$LOG"
+fi
+
+# Iterate open children captured in resolve-rig
+jq -c '.[]' ".convoy-logs/{{convoy_id}}/open-children.json" \
+| while read -r ROW; do
+    BEAD=$(printf '%s' "$ROW" | jq -r '.id')
+    STATUS=$(printf '%s' "$ROW" | jq -r '.status')
+
+    # Skip if already claimed (resume-safe)
+    if [ "$STATUS" = "in_progress" ]; then
+      continue
+    fi
+
+    TITLE=$(printf '%s' "$ROW" | jq -r '.title // ""')
+    DESC=$(printf '%s' "$ROW" | jq -r '.description // ""')
+    TEXT=$(printf '%s\n%s' "$TITLE" "$DESC" | tr '[:upper:]' '[:lower:]')
+
+    # Classification (grep-style heuristic; refine as needed)
+    TRIVIAL="false"
+    VARIANT="polecat-sonnet"
+    WORK_FORMULA="mol-polecat-work-monorepo"
+
+    # Trivial: single-file / typo / version bump / config rename / comment-only
+    if printf '%s' "$TEXT" | grep -qE 'typo|version bump|bump dependency|rename (the )?(config|string|variable|constant)|comment.only|trivial doc|doc (fix|typo)'; then
+      TRIVIAL="true"
+    fi
+
+    # Escalate to opus-high when text shows complexity signals
+    if printf '%s' "$TEXT" | grep -qE 'architecture|migration|cross.cutting|new subsystem|hard debug|security.sensitive|data model|schema change|rewrite|refactor across'; then
+      VARIANT="polecat-opus-high"
+      TRIVIAL="false"
+    fi
+
+    # Tests-first beads prefer the TDD variant
+    if printf '%s' "$TEXT" | grep -qE 'tests? first|tdd|red.green.refactor'; then
+      WORK_FORMULA="mol-polecat-work-monorepo-tdd"
+    fi
+
+    gc sling "$RIG/$VARIANT" "$BEAD" \
+      --on "$WORK_FORMULA" \
+      --meta "trivial=$TRIVIAL"
+
+    printf '%s\t%s\t%s\t%s\t%s\n' \
+      "$BEAD" "$VARIANT" "$TRIVIAL" "$WORK_FORMULA" "$(date -u +%FT%TZ)" \
+      >> "$LOG"
+  done
+```
+
+Exit criteria: every open child bead slung to a polecat variant; every
+dispatch recorded in `.convoy-logs/{{convoy_id}}/dispatch.tsv` with
+(bead_id, variant, trivial, formula, slung_at).
+'''
+
+[[steps]]
+id = "summary"
+title = "Report dispatch summary to the human"
+needs = ["classify-and-sling"]
+description = '''
+Tally the dispatch log and send a single summary notification so Casey
+knows the convoy is in flight without needing to watch.
+
+```bash
+LOG=".convoy-logs/{{convoy_id}}/dispatch.tsv"
+TOTAL=$(tail -n +2 "$LOG" | wc -l | awk '{print $1}')
+BY_VARIANT=$(tail -n +2 "$LOG" | awk -F'\t' '{print $2}' | sort | uniq -c | awk '{printf "  %s: %s\n", $2, $1}')
+TRIVIAL_COUNT=$(tail -n +2 "$LOG" | awk -F'\t' '$3=="true"' | wc -l | awk '{print $1}')
+
+SUBJECT="Convoy {{convoy_id}} dispatched ($TOTAL beads)"
+BODY=$(cat <<EOF
+Convoy {{convoy_id}} dispatched.
+
+Total slung: $TOTAL
+Trivial (no ralph): $TRIVIAL_COUNT
+
+By variant:
+$BY_VARIANT
+
+Log: $LOG
+EOF
+)
+
+"$GC_CITY_DIR/scripts/sc-notify-human.sh" "$SUBJECT" "$BODY"
+```
+
+Exit criteria: Casey receives a single consolidated notification with the
+dispatch shape. Polecats are running; refinery (or direct push) takes over
+per polecat completion.
+'''

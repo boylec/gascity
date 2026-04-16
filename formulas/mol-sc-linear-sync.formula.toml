@@ -1,0 +1,125 @@
+description = '''
+SafetyChain Linear-sync safety net. Runs every 10 minutes (via
+formulas/orders/linear-sync/order.toml). Finds closed convoys that:
+
+- have metadata.linear_id set (were created by mol-sc-idea-to-plan)
+- do NOT have metadata.sc.linear_transitioned_at yet
+
+For each, calls linear-server -> save_issue state="In Review" to reconcile
+Linear state with the closed convoy, then stamps metadata.sc.linear_transitioned_at
+so subsequent runs skip it.
+
+This exists because mol-convoy-cleanup.sc-linear-transition can miss
+transitions when the MCP is unauthenticated, rate-limited, or when a
+convoy is closed manually (bypassing the cleanup formula).
+
+## Failure modes
+
+| Situation | Action |
+|---|---|
+| linear-server MCP unauthenticated | Mail human once per run with `linear-server needs auth` prompt; continue loop |
+| save_issue returns 429 / 5xx | Skip this bead, retry next run (10m later) |
+| Linear issue already In Review / Done | save_issue is idempotent; stamp metadata and move on |
+| Linear issue deleted | Stamp metadata with a "deleted" marker so we stop retrying |
+'''
+formula = "mol-sc-linear-sync"
+version = 1
+
+[[steps]]
+id = "find-unreconciled"
+title = "Find closed convoys with linear_id that have not been transitioned"
+description = '''
+Query beads for closed convoys with Linear linkage but no transition
+timestamp. Emit the list of convoy IDs + Linear IDs to process.
+
+```bash
+OUT="/tmp/sc-linear-sync-$(date +%s).jsonl"
+
+bd list --status=closed --type=convoy --json 2>/dev/null \
+  | jq -c '.[] | select(
+      (.metadata.linear_id // "") != "" and
+      (.metadata.sc.linear_transitioned_at // "") == ""
+    ) | {convoy: .id, linear_id: .metadata.linear_id}' \
+  > "$OUT"
+
+COUNT=$(wc -l < "$OUT" | awk '{print $1}')
+echo "Unreconciled closed convoys: $COUNT"
+echo "$OUT" > /tmp/sc-linear-sync-current.path
+```
+
+Exit criteria: newline-delimited JSON with {convoy, linear_id} per bead at
+the path recorded in /tmp/sc-linear-sync-current.path.
+'''
+
+[[steps]]
+id = "reconcile"
+title = "Transition each unreconciled Linear issue to In Review"
+needs = ["find-unreconciled"]
+description = '''
+For each entry from find-unreconciled, call linear-server MCP to set
+state="In Review". On success, stamp the convoy with
+metadata.sc.linear_transitioned_at. On failure, leave the metadata
+missing so the next run retries.
+
+```bash
+OUT=$(cat /tmp/sc-linear-sync-current.path)
+[ -z "$OUT" ] || [ ! -f "$OUT" ] && { echo "no input file"; exit 0; }
+
+FAILURES=0
+SUCCESSES=0
+
+while IFS= read -r LINE; do
+  CONVOY=$(printf '%s' "$LINE" | jq -r '.convoy')
+  LINEAR_ID=$(printf '%s' "$LINE" | jq -r '.linear_id')
+
+  # Attempt the MCP transition. Run this via the provider's MCP call.
+  # Pseudo: mcp linear-server save_issue id=$LINEAR_ID state="In Review"
+  # If the attempt succeeds, stamp the transition timestamp.
+  if mcp_save_issue_ok "$LINEAR_ID" "In Review"; then
+    bd update "$CONVOY" \
+      --set-metadata "sc.linear_transitioned_at=$(date -u +%FT%TZ)"
+    SUCCESSES=$((SUCCESSES + 1))
+  else
+    FAILURES=$((FAILURES + 1))
+  fi
+done < "$OUT"
+
+echo "reconciled=$SUCCESSES failed=$FAILURES"
+rm -f "$OUT" /tmp/sc-linear-sync-current.path
+```
+
+Note: `mcp_save_issue_ok` is not a real command — the dog running this
+formula invokes the linear-server MCP via its provider interface and
+treats any 2xx response as success. Implementation detail belongs in the
+agent's prompt template, not the formula.
+
+Exit criteria: every unreconciled convoy either stamped with
+sc.linear_transitioned_at (success) or left alone for a future run
+(failure). Counts logged to stdout.
+'''
+
+[[steps]]
+id = "report-if-needed"
+title = "Only notify human when something interesting happened"
+needs = ["reconcile"]
+description = '''
+The dog runs this order every 10 minutes. Most runs find zero work.
+Notify the human only when:
+
+- Successes > 0 (so Casey sees Linear state catching up), OR
+- Failures > 0 repeatedly (suggesting MCP auth issue or API outage).
+
+```bash
+# Dog reads the previous step's echo'd counts from its session log.
+# If SUCCESSES > 0 or consecutive FAILURES >= 3, send a consolidated
+# notification via sc-notify-human.sh.
+#
+# Otherwise exit silently.
+```
+
+Keeping this order quiet on the happy path (no work to do) prevents
+notification spam — the dog runs every 10m across many convoys.
+
+Exit criteria: Casey is informed of meaningful state changes without
+being spammed by empty passes.
+'''
