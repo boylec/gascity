@@ -9,3 +9,4 @@ hooks/
 *.db
 .beads-credential-key
 .claude/settings.local.json
+.claude/ralph-loop.local.md

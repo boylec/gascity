@@ -1,0 +1,11 @@
+[pack]
+name = "SafetyChain"
+version = ""
+schema = 1
+
+[imports]
+[imports.gastown]
+source = "./.gc/system/packs/gastown"
+[imports.safetychain]
+source = "./packs/safetychain"
+

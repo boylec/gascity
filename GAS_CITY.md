@@ -6,7 +6,7 @@ For agents, the canonical source of behavior is
 
 ## TL;DR
 
-```
+```plaintext
 Linear issue or free-text idea
       │
       ▼
@@ -38,7 +38,7 @@ Convoy auto-closes → Linear transitions to In Review
 The mayor (`hq/mayor`) is always running. Attach to its session and tell
 it what you want. Examples:
 
-```
+```bash
 plan SAF-123                       # Linear path: mayor pulls issue via MCP
 plan add convoy dispatch timeouts  # free-text path: mayor uses your text
 dispatch <convoy-id>               # implement a previously-planned convoy
@@ -71,11 +71,11 @@ to notify you, and branch rules.
 
 Three polecat variants are stamped into every rig (see `packs/safetychain/pack.toml`):
 
-| Variant | Model + effort | When mayor picks it |
-|---|---|---|
-| `polecat-sonnet` | sonnet, effort=medium | Default. Implementation beads. Parallel review legs. |
-| `polecat-opus-high` | opus, effort=high | Architecture, migration, cross-cutting, hard debug, security-sensitive, data model, new subsystem. |
-| `polecat-opus-max-1m` | opus[1m], effort=max | Planning coordinator (`mol-sc-idea-to-plan` runs here). Needs 1M context for PRD + many review legs. |
+| Variant               | Model + effort        | When mayor picks it                                                                                  |
+| --------------------- | --------------------- | ---------------------------------------------------------------------------------------------------- |
+| `polecat-sonnet`      | sonnet, effort=medium | Default. Implementation beads. Parallel review legs.                                                 |
+| `polecat-opus-high`   | opus, effort=high     | Architecture, migration, cross-cutting, hard debug, security-sensitive, data model, new subsystem.   |
+| `polecat-opus-max-1m` | opus[1m], effort=max  | Planning coordinator (`mol-sc-idea-to-plan` runs here). Needs 1M context for PRD + many review legs. |
 
 Model/effort are passed to the `claude` CLI via provider presets in
 `city.toml` (`[providers.claude-sonnet]`, `[providers.claude-opus-high]`,
@@ -108,7 +108,7 @@ referenced is stale.
 
 ## File map
 
-```
+```plaintext
 /Users/caseyboyle/src/SafetyChain/gas-city/
 ├── city.toml                                  # workspace + rig + provider config
 ├── GAS_CITY.md                                # this file
@@ -189,15 +189,15 @@ that subject and acts on the body.
 
 ## Troubleshooting
 
-| Symptom | First check |
-|---|---|
-| Mayor doesn't recognize the plan command | `gc doctor`; `gc config explain --agent mayor`; restart mayor session |
-| Polecat slings but work doesn't start | `gc rig list`; check rig isn't suspended; `gc config explain --agent polecat-sonnet --rig enterprise` |
-| Approval gate never fires notification | Check `scripts/sc-notify-human.sh` executable; verify `SC_NOTIFY_WEBHOOK` if you expect webhook; tail macOS Console for osascript errors |
-| Linear stays "In Progress" after convoy close | `gc order run linear-sync` (force safety-net run); check `linear-server` MCP auth in `claude mcp list` |
-| Polecat pushes to wrong branch | Check `echo $GC_TARGET_BRANCH` inside polecat worktree; verify `[[rigs.overrides]]` for that variant in `city.toml` |
-| MCP `linear-server` fails with 401 | `claude mcp list` shows auth state; reauthenticate via your Claude Code session |
-| Convoy dispatch misclassifies a bead | Fix the heuristic in `mol-sc-sling-convoy.classify-and-sling`; or pass `--meta trivial=true/false` inline when slinging manually |
+| Symptom                                       | First check                                                                                                                              |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Mayor doesn't recognize the plan command      | `gc doctor`; `gc config explain --agent mayor`; restart mayor session                                                                    |
+| Polecat slings but work doesn't start         | `gc rig list`; check rig isn't suspended; `gc config explain --agent polecat-sonnet --rig enterprise`                                    |
+| Approval gate never fires notification        | Check `scripts/sc-notify-human.sh` executable; verify `SC_NOTIFY_WEBHOOK` if you expect webhook; tail macOS Console for osascript errors |
+| Linear stays "In Progress" after convoy close | `gc order run linear-sync` (force safety-net run); check `linear-server` MCP auth in `claude mcp list`                                   |
+| Polecat pushes to wrong branch                | Check `echo $GC_TARGET_BRANCH` inside polecat worktree; verify `[[rigs.overrides]]` for that variant in `city.toml`                      |
+| MCP `linear-server` fails with 401            | `claude mcp list` shows auth state; reauthenticate via your Claude Code session                                                          |
+| Convoy dispatch misclassifies a bead          | Fix the heuristic in `mol-sc-sling-convoy.classify-and-sling`; or pass `--meta trivial=true/false` inline when slinging manually         |
 
 ## Non-goals / what this flow does NOT do
 

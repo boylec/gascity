@@ -3,21 +3,30 @@ name = "SafetyChain"
 prefix = "hq"
 provider = "claude"
 global_fragments = ["command-glossary", "operational-awareness", "linear-transitions", "target-branch-override", "sc-policy"]
-includes = [".gc/system/packs/gastown", "packs/safetychain"]
 
+[providers]
 [providers.claude]
-option_defaults = { permission_mode = "unrestricted" }
-
-# SafetyChain Claude provider presets — bind Claude CLI flags per variant.
-# Polecat variants (defined in packs/safetychain) are bound to these presets.
-[providers.claude-sonnet]
-option_defaults = { model = "sonnet", effort = "medium", permission_mode = "unrestricted" }
-
+ready_delay_ms = 0
+[providers.claude.option_defaults]
+permission_mode = "unrestricted"
 [providers.claude-opus-high]
-option_defaults = { model = "opus", effort = "high", permission_mode = "unrestricted" }
-
+ready_delay_ms = 0
+[providers.claude-opus-high.option_defaults]
+effort = "high"
+model = "opus"
+permission_mode = "unrestricted"
 [providers.claude-opus-max-1m]
-option_defaults = { model = "opus[1m]", effort = "max", permission_mode = "unrestricted" }
+ready_delay_ms = 0
+[providers.claude-opus-max-1m.option_defaults]
+effort = "max"
+model = "opus[1m]"
+permission_mode = "unrestricted"
+[providers.claude-sonnet]
+ready_delay_ms = 0
+[providers.claude-sonnet.option_defaults]
+effort = "medium"
+model = "sonnet"
+permission_mode = "unrestricted"
 
 [[rigs]]
 name = "enterprise"
@@ -57,11 +66,11 @@ prefix = "de"
 suspended = true
 includes = [".gc/system/packs/gastown", "packs/safetychain"]
 
+[session]
+startup_timeout = "180s"
+
 [daemon]
 patrol_interval = "30s"
 max_restarts = 5
 restart_window = "1h"
 shutdown_timeout = "5s"
-
-[session]
-startup_timeout = "180s"
