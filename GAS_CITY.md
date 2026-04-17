@@ -140,7 +140,7 @@ referenced is stale.
 
 ## Notification and reply channels
 
-**Outbound (agents → Casey):** `scripts/sc-notify-human.sh "<subject>" "<body>"`.
+**Outbound (agents → Casey):** `assets/scripts/sc-notify-human.sh "<subject>" "<body>"`.
 Fans out to:
 
 1. `gc mail send human` for inbox audit trail
@@ -197,7 +197,7 @@ that subject and acts on the body.
 | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | Mayor doesn't recognize the plan command      | `gc doctor`; `gc config explain --agent mayor`; restart mayor session                                                                    |
 | Polecat slings but work doesn't start         | `gc rig list`; check rig isn't suspended; `gc config explain --agent polecat-sonnet --rig enterprise`                                    |
-| Approval gate never fires notification        | Check `scripts/sc-notify-human.sh` executable; verify `SC_NOTIFY_WEBHOOK` if you expect webhook; tail macOS Console for osascript errors |
+| Approval gate never fires notification        | Check `assets/scripts/sc-notify-human.sh` executable; verify `SC_NOTIFY_WEBHOOK` if you expect webhook; tail macOS Console for osascript errors |
 | Linear stays "In Progress" after convoy close | `gc order run linear-sync` (force safety-net run); check `linear-server` MCP auth in `claude mcp list`                                   |
 | Polecat pushes to wrong branch                | Check `echo $GC_TARGET_BRANCH` inside polecat worktree; verify `[[rigs.overrides]]` for that variant in `city.toml`                      |
 | MCP `linear-server` fails with 401            | `claude mcp list` shows auth state; reauthenticate via your Claude Code session                                                          |
@@ -227,5 +227,5 @@ that subject and acts on the body.
 - Linear in-formula transition: `formulas/mol-convoy-cleanup.formula.toml`
 - Linear safety-net: `formulas/mol-sc-linear-sync.formula.toml` +
   `packs/safetychain/formulas/orders/linear-sync/order.toml`
-- Notification channels: `scripts/sc-notify-human.sh`
+- Notification channels: `assets/scripts/sc-notify-human.sh`
 - Branch enforcement: `city.toml` `[[rigs.overrides]]` env

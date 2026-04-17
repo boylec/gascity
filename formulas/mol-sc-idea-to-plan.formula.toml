@@ -2,7 +2,7 @@ description = '''
 SafetyChain wrapper over mol-idea-to-plan. Adds two behaviors:
 
 1. Final human approval gate between plan-review-3 and create-beads.
-   Uses scripts/sc-notify-human.sh for push notification and polls the
+   Uses assets/scripts/sc-notify-human.sh for push notification and polls the
    coordinator's mail inbox for an async GO / request-changes / abort
    reply. Never stalls silently.
 
@@ -81,7 +81,7 @@ EOF
 **2. Fan out the notification (best-effort, non-blocking).**
 
 ```bash
-"$GC_CITY_DIR/scripts/sc-notify-human.sh" "$SUBJECT" "$BODY"
+"$GC_CITY_DIR/assets/scripts/sc-notify-human.sh" "$SUBJECT" "$BODY"
 ```
 
 **3. Also post the same summary into the live conversation** so an
@@ -215,7 +215,7 @@ Dispatch:
 Artifacts live in .designs/$REVIEW_ID/ and .plan-reviews/$REVIEW_ID/.
 EOF
 )
-"$GC_CITY_DIR/scripts/sc-notify-human.sh" "$SUBJECT" "$BODY"
+"$GC_CITY_DIR/assets/scripts/sc-notify-human.sh" "$SUBJECT" "$BODY"
 ```
 
 **Final output** of this workflow is a reviewed plan plus a beads DAG, not

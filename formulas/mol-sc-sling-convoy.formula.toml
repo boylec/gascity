@@ -157,7 +157,7 @@ Log: $LOG
 EOF
 )
 
-"$GC_CITY_DIR/scripts/sc-notify-human.sh" "$SUBJECT" "$BODY"
+"$GC_CITY_DIR/assets/scripts/sc-notify-human.sh" "$SUBJECT" "$BODY"
 ```
 
 Exit criteria: Casey receives a single consolidated notification with the

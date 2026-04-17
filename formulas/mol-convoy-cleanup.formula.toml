@@ -233,7 +233,7 @@ this step. Log the failure, mail the human, and let the linear-sync
 reconciliation order pick it up later:
 
 ```bash
-"$GC_CITY_DIR/scripts/sc-notify-human.sh" \
+"$GC_CITY_DIR/assets/scripts/sc-notify-human.sh" \
   "Linear transition failed: $LINEAR_ID" \
   "Convoy {{convoy}} closed but save_issue state=In Review returned an error. linear-sync will retry within 10 minutes."
 ```
@@ -248,7 +248,7 @@ bd note {{convoy}} "Linear $LINEAR_ID transitioned to In Review on convoy close.
 targeted at mayor, not human).**
 
 ```bash
-"$GC_CITY_DIR/scripts/sc-notify-human.sh" \
+"$GC_CITY_DIR/assets/scripts/sc-notify-human.sh" \
   "SAF-${LINEAR_ID#SAF-} -> In Review" \
   "Convoy {{convoy}} closed. Linear $LINEAR_ID transitioned to In Review."
 ```
