@@ -9,3 +9,11 @@ source = "./.gc/system/packs/gastown"
 [imports.safetychain]
 source = "./packs/safetychain"
 
+[agent_defaults]
+append_fragments = [
+    "command-glossary",
+    "operational-awareness",
+    "linear-transitions",
+    "target-branch-override",
+    "sc-policy",
+]
