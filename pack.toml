@@ -17,3 +17,27 @@ append_fragments = [
     "target-branch-override",
     "sc-policy",
 ]
+
+[providers]
+[providers.claude]
+ready_delay_ms = 0
+[providers.claude.option_defaults]
+permission_mode = "unrestricted"
+[providers.claude-opus-high]
+ready_delay_ms = 0
+[providers.claude-opus-high.option_defaults]
+effort = "high"
+model = "opus"
+permission_mode = "unrestricted"
+[providers.claude-opus-max-1m]
+ready_delay_ms = 0
+[providers.claude-opus-max-1m.option_defaults]
+effort = "max"
+model = "opus[1m]"
+permission_mode = "unrestricted"
+[providers.claude-sonnet]
+ready_delay_ms = 0
+[providers.claude-sonnet.option_defaults]
+effort = "medium"
+model = "sonnet"
+permission_mode = "unrestricted"
