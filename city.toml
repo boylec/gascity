@@ -7,7 +7,7 @@ provider = "claude"
 name = "enterprise"
 path = "../enterprise"
 prefix = "sc"
-
+[rigs.imports]
 [rigs.imports.gastown]
 source = "./.gc/system/packs/gastown"
 [rigs.imports.safetychain]
@@ -43,7 +43,7 @@ name = "designsystem"
 path = "../design-system"
 prefix = "de"
 suspended = true
-
+[rigs.imports]
 [rigs.imports.gastown]
 source = "./.gc/system/packs/gastown"
 [rigs.imports.safetychain]

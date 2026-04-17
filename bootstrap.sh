@@ -196,6 +196,90 @@ else
   fi
 fi
 
+# ── Phase 3: DoltHub remote setup ────────────────────────────────────────────
+#
+# Each beads database (hq + one per rig) gets a DoltHub remote so issues sync
+# off-machine. Auth uses dolt's JWK creds (created by `dolt login`) — bd dolt
+# push picks them up transparently, no PAT or per-peer credential vault.
+#
+# Key distinctions learned the hard way:
+#   - URL scheme MUST be https://doltremoteapi.dolthub.com/<org>/<repo>.
+#     `dolthub://<org>/<repo>` is bd-federation shorthand but bd dolt push
+#     rejects it with "unknown url scheme: dolthub".
+#   - `bd federation add-peer` and `bd dolt remote add` write to the same
+#     underlying dolt_remotes SQL table — either command works, but the
+#     federation wrapper also records sovereignty tier.
+#   - `bd federation sync` is a separate layer that wants per-peer encrypted
+#     credentials in a federation_peers table. For DoltHub-only sync that is
+#     NOT needed — `bd dolt push` using JWK is sufficient. We skip federation
+#     sync setup by default.
+#
+# Requirements:
+#   - `dolt login` must have been run (check `dolt creds check`).
+#   - Each DoltHub repo must exist at safety-chain/<repo>. Mayor/admin
+#     creates these once via the DoltHub web UI.
+
+echo ""
+echo "── Phase 3: DoltHub remotes ─────────────────────────────────────────────"
+
+# Verify dolt creds
+if ! dolt creds check >/dev/null 2>&1; then
+  echo "⚠ dolt creds not valid. Run: dolt login"
+  echo "  Skipping DoltHub remote setup. Re-run this script after dolt login."
+else
+  DOLTHUB_USER=$(dolt creds check 2>/dev/null | awk -F': *' '/User:/ {print $2}')
+  echo "✓ dolt authenticated as $DOLTHUB_USER"
+
+  # Per-rig remote configuration. DoltHub repo pattern follows:
+  #   safety-chain/<github-user>-gas-city-<suffix>
+  # hq    → <github-user>-gas-city-hq
+  # rigs  → <github-user>-gas-city-<rig-name>-rig
+  REMOTES=(
+    "${CITY_DIR}|hq|${GH_USER}-gas-city-hq"
+    "${PARENT_DIR}/enterprise|sc|${GH_USER}-gas-city-enterprise-rig"
+    "${PARENT_DIR}/design-system|de|${GH_USER}-gas-city-designsystem-rig"
+  )
+
+  for entry in "${REMOTES[@]}"; do
+    IFS='|' read -r dir prefix repo <<< "$entry"
+    url="https://doltremoteapi.dolthub.com/safety-chain/${repo}"
+
+    if [ ! -d "$dir/.beads" ]; then
+      echo "  - $prefix: .beads/ missing at $dir — skipping (rig not initialized)"
+      continue
+    fi
+
+    # Idempotent: if remote already points at the right URL, skip.
+    existing=$(cd "$dir" && bd dolt remote list 2>/dev/null | awk '/^origin/ {print $2}')
+    if [ "$existing" = "$url" ]; then
+      echo "  ✓ $prefix: origin → $url"
+      continue
+    fi
+
+    if [ -n "$existing" ]; then
+      echo "  ~ $prefix: replacing origin ($existing → $url)"
+      (cd "$dir" && bd federation remove-peer origin >/dev/null 2>&1 || true)
+    else
+      echo "  + $prefix: adding origin → $url"
+    fi
+
+    (cd "$dir" && bd federation add-peer origin "$url" --sovereignty T1) \
+      || echo "    ! add-peer failed for $prefix (continue; investigate manually)"
+  done
+
+  # Verify each remote can actually reach DoltHub via JWK auth.
+  echo ""
+  echo "  Verifying JWK push access..."
+  for entry in "${REMOTES[@]}"; do
+    IFS='|' read -r dir prefix _ <<< "$entry"
+    [ ! -d "$dir/.beads" ] && continue
+    if (cd "$dir" && bd dolt push >/dev/null 2>&1); then
+      echo "  ✓ $prefix: push ok"
+    else
+      echo "  ! $prefix: push failed — check 'dolt creds check' and DoltHub repo existence"
+    fi
+  done
+fi
+
 echo ""
 echo "Done. Run 'gc status' to verify, 'gc doctor --fix' to clean any warnings."
-echo "DoltHub remote setup (Phase 3) is optional — see the bootstrap skill for details."
