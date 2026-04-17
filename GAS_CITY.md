@@ -2,7 +2,7 @@
 
 Operational reference for how this workspace turns ideas into merged code.
 For agents, the canonical source of behavior is
-`prompts/shared/sc-policy.md.tmpl`. For humans, this is the map.
+`template-fragments/sc-policy.md.tmpl`. For humans, this is the map.
 
 ## TL;DR
 
@@ -44,7 +44,7 @@ plan add convoy dispatch timeouts  # free-text path: mayor uses your text
 dispatch <convoy-id>               # implement a previously-planned convoy
 ```
 
-Mayor reads `prompts/shared/sc-policy.md.tmpl` at startup, so it knows:
+Mayor reads `template-fragments/sc-policy.md.tmpl` at startup, so it knows:
 entry-mode detection, polecat variant selection, ralph-loop default, how
 to notify you, and branch rules.
 
@@ -122,12 +122,16 @@ referenced is stale.
 │   └── ... 20+ more existing local formulas
 ├── packs/
 │   └── safetychain/
-│       ├── pack.toml                          # polecat variants (bound to provider presets)
-│       └── formulas/orders/linear-sync/
-│           └── order.toml                     # 10m cron for mol-sc-linear-sync
-├── prompts/
-│   └── shared/
-│       └── sc-policy.md.tmpl                  # policy fragment in global_fragments
+│       ├── pack.toml                          # polecat sub-pack (flattens to root in step 9)
+│       └── agents/
+│           ├── polecat-sonnet/agent.toml
+│           ├── polecat-opus-high/agent.toml
+│           └── polecat-opus-max-1m/agent.toml
+├── orders/
+│   ├── beads-health.toml
+│   └── linear-sync.toml                       # 10m cron for mol-sc-linear-sync
+├── template-fragments/
+│   └── sc-policy.md.tmpl                      # policy fragment (append_fragments in pack.toml)
 ├── scripts/
 │   ├── sc-notify-human.sh                     # multi-channel human notifier
 │   └── ... existing shared scripts
@@ -215,9 +219,9 @@ that subject and acts on the body.
 
 ## Where to change what
 
-- Policy for mayor / polecats: `prompts/shared/sc-policy.md.tmpl`
-- Polecat variants + provider bindings: `city.toml` (providers) +
-  `packs/safetychain/pack.toml` (agents)
+- Policy for mayor / polecats: `template-fragments/sc-policy.md.tmpl`
+- Polecat variants + provider bindings: `pack.toml` (providers) +
+  `packs/safetychain/agents/<variant>/agent.toml`
 - Planning flow shape: `formulas/mol-sc-idea-to-plan.formula.toml`
 - Convoy dispatch heuristic: `formulas/mol-sc-sling-convoy.formula.toml`
 - Linear in-formula transition: `formulas/mol-convoy-cleanup.formula.toml`

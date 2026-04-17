@@ -25,7 +25,7 @@ If the work is free-text (no Linear issue):
 
 - Sling with --var problem="..." --var context="..." (omit linear_id)
 
-See prompts/shared/sc-policy.md.tmpl for the entry-mode detection rule.
+See template-fragments/sc-policy.md.tmpl for the entry-mode detection rule.
 
 ## Pipeline
 
