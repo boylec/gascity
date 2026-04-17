@@ -69,7 +69,7 @@ to notify you, and branch rules.
 
 ## Model / effort / variant selection
 
-Three polecat variants are stamped into every rig (see `packs/safetychain/pack.toml`):
+Three polecat variants are stamped into every rig (see `assets/safetychain/pack.toml`):
 
 | Variant               | Model + effort        | When mayor picks it                                                                                  |
 | --------------------- | --------------------- | ---------------------------------------------------------------------------------------------------- |
@@ -221,11 +221,11 @@ that subject and acts on the body.
 
 - Policy for mayor / polecats: `template-fragments/sc-policy.md.tmpl`
 - Polecat variants + provider bindings: `pack.toml` (providers) +
-  `packs/safetychain/agents/<variant>/agent.toml`
+  `assets/safetychain/agents/<variant>/agent.toml`
 - Planning flow shape: `formulas/mol-sc-idea-to-plan.formula.toml`
 - Convoy dispatch heuristic: `formulas/mol-sc-sling-convoy.formula.toml`
 - Linear in-formula transition: `formulas/mol-convoy-cleanup.formula.toml`
 - Linear safety-net: `formulas/mol-sc-linear-sync.formula.toml` +
-  `packs/safetychain/formulas/orders/linear-sync/order.toml`
+  `orders/linear-sync.toml`
 - Notification channels: `assets/scripts/sc-notify-human.sh`
 - Branch enforcement: `city.toml` `[[rigs.overrides]]` env

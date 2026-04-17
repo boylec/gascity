@@ -11,7 +11,7 @@ prefix = "sc"
 [rigs.imports.gastown]
 source = "./.gc/system/packs/gastown"
 [rigs.imports.safetychain]
-source = "./packs/safetychain"
+source = "./assets/safetychain"
 
 [[rigs.overrides]]
 agent = "polecat"
@@ -47,7 +47,7 @@ suspended = true
 [rigs.imports.gastown]
 source = "./.gc/system/packs/gastown"
 [rigs.imports.safetychain]
-source = "./packs/safetychain"
+source = "./assets/safetychain"
 
 [session]
 startup_timeout = "180s"
