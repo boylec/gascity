@@ -32,7 +32,11 @@ permission_mode = "unrestricted"
 name = "enterprise"
 path = "../enterprise"
 prefix = "sc"
-includes = [".gc/system/packs/gastown", "packs/safetychain"]
+
+[rigs.imports.gastown]
+source = "./.gc/system/packs/gastown"
+[rigs.imports.safetychain]
+source = "./packs/safetychain"
 
 [[rigs.overrides]]
 agent = "polecat"
@@ -64,7 +68,11 @@ name = "designsystem"
 path = "../design-system"
 prefix = "de"
 suspended = true
-includes = [".gc/system/packs/gastown", "packs/safetychain"]
+
+[rigs.imports.gastown]
+source = "./.gc/system/packs/gastown"
+[rigs.imports.safetychain]
+source = "./packs/safetychain"
 
 [session]
 startup_timeout = "180s"
