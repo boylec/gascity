@@ -3,6 +3,8 @@ name = "SafetyChain"
 schema = 1
 
 [imports]
+[imports.gastown]
+source = "./.gc/system/packs/gastown"
 [imports.safetychain]
 source = "./assets/safetychain"
 
