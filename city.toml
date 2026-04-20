@@ -1,17 +1,12 @@
+agent = []
+
 [workspace]
-name = "SafetyChain"
-prefix = "hq"
+name = ""
 provider = "claude"
 
 [[rigs]]
 name = "enterprise"
-path = "../enterprise"
 prefix = "sc"
-[rigs.imports]
-[rigs.imports.gastown]
-source = "./.gc/system/packs/gastown"
-[rigs.imports.safetychain]
-source = "./assets/safetychain"
 
 [[rigs.overrides]]
 agent = "polecat"
@@ -40,14 +35,8 @@ GC_TARGET_BRANCH = "boylec/develop"
 
 [[rigs]]
 name = "designsystem"
-path = "../design-system"
 prefix = "de"
 suspended = true
-[rigs.imports]
-[rigs.imports.gastown]
-source = "./.gc/system/packs/gastown"
-[rigs.imports.safetychain]
-source = "./assets/safetychain"
 
 [session]
 startup_timeout = "180s"

@@ -2,9 +2,9 @@ scope = "rig"
 provider = "claude-opus-high"
 wake_mode = "fresh"
 work_dir = ".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"
-prompt_template = "../../.gc/system/packs/gastown/prompts/polecat.md.tmpl"
+prompt_template = ".gc/system/packs/gastown/prompts/polecat.md.tmpl"
 nudge = "Run gc hook; it checks assigned work first, then routed pool work."
-overlay_dir = "../../.gc/system/packs/gastown/overlays/default"
+overlay_dir = ".gc/system/packs/gastown/overlays/default"
 pre_start = ["{{.ConfigDir}}/.gc/system/packs/gastown/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 idle_timeout = "2h"
 session_live = [
@@ -13,4 +13,4 @@ session_live = [
 ]
 min_active_sessions = 0
 max_active_sessions = 3
-namepool = "../../.gc/system/packs/gastown/namepools/mad-max.txt"
+namepool = ".gc/system/packs/gastown/namepools/mad-max.txt"

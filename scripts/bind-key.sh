@@ -1,1 +1,0 @@
-/Users/caseyboyle/src/SafetyChain/gas-city/.gc/system/packs/gastown/scripts/bind-key.sh

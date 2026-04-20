@@ -69,7 +69,7 @@ to notify you, and branch rules.
 
 ## Model / effort / variant selection
 
-Three polecat variants are stamped into every rig (see `assets/safetychain/pack.toml`):
+Three polecat variants are stamped into every rig (see `pack.toml` and `agents/`):
 
 | Variant               | Model + effort        | When mayor picks it                                                                                  |
 | --------------------- | --------------------- | ---------------------------------------------------------------------------------------------------- |
@@ -112,21 +112,18 @@ referenced is stale.
 /Users/caseyboyle/src/SafetyChain/gas-city/
 ├── city.toml                                  # workspace + rig + provider config
 ├── GAS_CITY.md                                # this file
-├── formulas/                                  # local formulas
-│   ├── mol-sc-idea-to-plan.formula.toml       # planning wrapper (extends mol-idea-to-plan)
-│   ├── mol-sc-sling-convoy.formula.toml       # convoy dispatch + classification
-│   ├── mol-sc-linear-sync.formula.toml        # safety-net Linear reconciliation
-│   ├── mol-convoy-cleanup.formula.toml        # modified: adds sc-linear-transition step
-│   ├── mol-polecat-base.formula.toml          # (existing) shared polecat steps
-│   ├── mol-polecat-work-monorepo.formula.toml # (existing) monorepo implementation
-│   └── ... 20+ more existing local formulas
-├── packs/
-│   └── safetychain/
-│       ├── pack.toml                          # polecat sub-pack (flattens to root in step 9)
-│       └── agents/
-│           ├── polecat-sonnet/agent.toml
-│           ├── polecat-opus-high/agent.toml
-│           └── polecat-opus-max-1m/agent.toml
+├── formulas/                                      # local formulas (SC overrides only)
+│   ├── mol-sc-idea-to-plan.formula.toml           # planning wrapper (extends mol-idea-to-plan)
+│   ├── mol-sc-sling-convoy.formula.toml           # convoy dispatch + classification
+│   ├── mol-sc-linear-sync.formula.toml            # safety-net Linear reconciliation
+│   ├── mol-convoy-cleanup.formula.toml            # adds sc-linear-transition step
+│   ├── mol-polecat-work-monorepo.formula.toml     # SC polecat (monorepo flavor)
+│   ├── mol-polecat-work-monorepo-tdd.formula.toml # SC polecat (TDD flavor)
+│   └── tdd-cycle.formula.toml                     # red-green-refactor helper
+├── agents/                                        # PackV2 root-level agents
+│   ├── polecat-sonnet/agent.toml
+│   ├── polecat-opus-high/agent.toml
+│   └── polecat-opus-max-1m/agent.toml
 ├── orders/
 │   ├── beads-health.toml
 │   └── linear-sync.toml                       # 10m cron for mol-sc-linear-sync
@@ -221,7 +218,7 @@ that subject and acts on the body.
 
 - Policy for mayor / polecats: `template-fragments/sc-policy.md.tmpl`
 - Polecat variants + provider bindings: `pack.toml` (providers) +
-  `assets/safetychain/agents/<variant>/agent.toml`
+  `agents/<variant>/agent.toml`
 - Planning flow shape: `formulas/mol-sc-idea-to-plan.formula.toml`
 - Convoy dispatch heuristic: `formulas/mol-sc-sling-convoy.formula.toml`
 - Linear in-formula transition: `formulas/mol-convoy-cleanup.formula.toml`

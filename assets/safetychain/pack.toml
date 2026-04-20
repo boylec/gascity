@@ -1,9 +1,0 @@
-# SafetyChain local pack — adds polecat variants bound to named Claude
-# provider presets (defined in the root pack.toml). Shared prompt +
-# overlay + scripts come from gastown via relative paths. This pack is
-# imported by the city pack and each rig; it's rig-scoped only.
-# Polecat variant configs live in agents/<name>/.
-
-[pack]
-name = "safetychain"
-schema = 1

@@ -1,12 +1,12 @@
 [pack]
 name = "SafetyChain"
-schema = 1
+schema = 2
+version = "0.1.0"
 
-[imports]
 [imports.gastown]
+# Materialized into .gc/ by `gc init` from the gascity binary's embedded copy.
+# Version-locked to the installed gc; upgrade via `brew upgrade gastownhall/gascity/gascity`.
 source = "./.gc/system/packs/gastown"
-[imports.safetychain]
-source = "./assets/safetychain"
 
 [agent_defaults]
 append_fragments = [
@@ -17,25 +17,37 @@ append_fragments = [
     "sc-policy",
 ]
 
-[providers]
 [providers.claude]
+base = "claude"
 ready_delay_ms = 0
+
 [providers.claude.option_defaults]
 permission_mode = "unrestricted"
+
 [providers.claude-opus-high]
+base = "claude"
 ready_delay_ms = 0
+
 [providers.claude-opus-high.option_defaults]
 effort = "high"
 model = "opus"
 permission_mode = "unrestricted"
+
 [providers.claude-opus-max-1m]
+base = "claude"
 ready_delay_ms = 0
+# 1M-context Opus isn't in the built-in claude schema's `model` enum.
+# Pass the model flag directly to the claude CLI via args_append.
+args_append = ["--model", "claude-opus-4-7[1m]"]
+
 [providers.claude-opus-max-1m.option_defaults]
 effort = "max"
-model = "opus[1m]"
 permission_mode = "unrestricted"
+
 [providers.claude-sonnet]
+base = "claude"
 ready_delay_ms = 0
+
 [providers.claude-sonnet.option_defaults]
 effort = "medium"
 model = "sonnet"
