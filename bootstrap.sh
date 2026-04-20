@@ -257,11 +257,18 @@ else
   echo "✓ dolt authenticated as $DOLTHUB_USER"
 
   # Per-rig remote configuration. DoltHub repo pattern follows:
-  #   safety-chain/<github-user>-gas-city-<rig-name>-rig
+  #   safety-chain/<prefix>-gas-city-<rig-name>-rig
+  # <prefix> defaults to GH_USER but can be overridden with GC_DOLTHUB_REPO_PREFIX
+  # (needed when DoltHub repos were created under an alias that differs from
+  # the GitHub username — e.g. cboyle@safetychain vs. boylec@github).
   # hq is intentionally excluded — it uses git-based JSONL sync (above).
+  REPO_PREFIX="${GC_DOLTHUB_REPO_PREFIX:-$GH_USER}"
+  if [ "$REPO_PREFIX" != "$GH_USER" ]; then
+    echo "  DoltHub repo prefix: $REPO_PREFIX (GC_DOLTHUB_REPO_PREFIX override)"
+  fi
   REMOTES=(
-    "${PARENT_DIR}/enterprise|sc|${GH_USER}-gas-city-enterprise-rig"
-    "${PARENT_DIR}/design-system|de|${GH_USER}-gas-city-designsystem-rig"
+    "${PARENT_DIR}/enterprise|sc|${REPO_PREFIX}-gas-city-enterprise-rig"
+    "${PARENT_DIR}/design-system|de|${REPO_PREFIX}-gas-city-designsystem-rig"
   )
 
   for entry in "${REMOTES[@]}"; do
@@ -291,16 +298,34 @@ else
       || echo "    ! add-peer failed for $prefix (continue; investigate manually)"
   done
 
-  # Verify each remote can actually reach DoltHub via JWK auth.
+  # Verify each remote. When local is empty (fresh-bootstrap teammate case),
+  # pull to seed from DoltHub; otherwise push to verify JWK auth. Pushing a
+  # fresh/empty local first would overwrite a teammate's existing remote data.
   echo ""
-  echo "  Verifying JWK push access..."
+  echo "  Verifying DoltHub access..."
   for entry in "${REMOTES[@]}"; do
     IFS='|' read -r dir prefix _ <<< "$entry"
     [ ! -d "$dir/.beads" ] && continue
-    if (cd "$dir" && bd dolt push >/dev/null 2>&1); then
-      echo "  ✓ $prefix: push ok"
+    # Heuristic: a freshly-initialized dolt repo has a tiny noms dir. If the
+    # rig uses multi-db layout (.beads/dolt/<db>/.dolt/noms), check there too.
+    noms_size=0
+    for noms_path in "$dir/.beads/dolt/.dolt/noms" "$dir/.beads/dolt/$prefix/.dolt/noms"; do
+      [ -d "$noms_path" ] || continue
+      s=$(du -sk "$noms_path" 2>/dev/null | awk '{print $1}')
+      [ "${s:-0}" -gt "$noms_size" ] && noms_size=$s
+    done
+    if [ "${noms_size:-0}" -lt 100 ]; then
+      if (cd "$dir" && bd dolt pull >/dev/null 2>&1); then
+        echo "  ✓ $prefix: pulled from DoltHub (local was empty)"
+      else
+        echo "  ! $prefix: pull failed — check 'dolt creds check', DoltHub repo, and network"
+      fi
     else
-      echo "  ! $prefix: push failed — check 'dolt creds check' and DoltHub repo existence"
+      if (cd "$dir" && bd dolt push >/dev/null 2>&1); then
+        echo "  ✓ $prefix: push ok"
+      else
+        echo "  ! $prefix: push failed — check 'dolt creds check' and DoltHub repo existence"
+      fi
     fi
   done
 fi

@@ -7,6 +7,8 @@ provider = "claude"
 [[rigs]]
 name = "enterprise"
 prefix = "sc"
+dolt_host = "127.0.0.1"
+dolt_port = "58414"
 
 [[rigs.overrides]]
 agent = "polecat"
@@ -41,6 +43,8 @@ prefix = "gc"
 name = "designsystem"
 prefix = "de"
 suspended = true
+dolt_host = "127.0.0.1"
+dolt_port = "53930"
 
 [session]
 startup_timeout = "180s"
