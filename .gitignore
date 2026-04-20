@@ -10,3 +10,15 @@ hooks/
 .beads-credential-key
 .claude/settings.local.json
 .claude/ralph-loop.local.md
+
+# gc-managed artifacts regenerated on every `gc start`:
+# - formulas/* listed below are re-seeded from the embedded `core` pack by
+#   writeInitFormulas (cmd/gc/init_artifacts.go) when absent.
+# - scripts/* are symlinks rebuilt by resolveConfiguredScripts
+#   (cmd/gc/city_runtime.go) pointing into .gc/system/packs/*/scripts/.
+# Tracking them would just churn on every gc binary upgrade.
+formulas/mol-do-work.toml
+formulas/mol-polecat-base.toml
+formulas/mol-polecat-commit.toml
+formulas/mol-scoped-work.toml
+scripts/
