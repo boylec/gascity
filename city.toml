@@ -34,6 +34,10 @@ agent = "refinery"
 GC_TARGET_BRANCH = "boylec/develop"
 
 [[rigs]]
+name = "gascity"
+prefix = "gc"
+
+[[rigs]]
 name = "designsystem"
 prefix = "de"
 suspended = true
