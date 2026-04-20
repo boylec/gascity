@@ -196,11 +196,15 @@ else
   fi
 fi
 
-# ── Phase 3: DoltHub remote setup ────────────────────────────────────────────
+# ── Phase 3: Remote sync setup ───────────────────────────────────────────────
 #
-# Each beads database (hq + one per rig) gets a DoltHub remote so issues sync
-# off-machine. Auth uses dolt's JWK creds (created by `dolt login`) — bd dolt
-# push picks them up transparently, no PAT or per-peer credential vault.
+# hq uses a git-based JSONL sync remote (scheme git+https://...) configured in
+# .beads/config.yaml (sync.remote). That remote is committed in the repo, so
+# bootstrap only verifies reachability — it does not configure it.
+#
+# Rigs still use DoltHub remotes. Auth uses dolt's JWK creds (created by
+# `dolt login`) — bd dolt push picks them up transparently, no PAT or
+# per-peer credential vault.
 #
 # Key distinctions learned the hard way:
 #   - URL scheme MUST be https://doltremoteapi.dolthub.com/<org>/<repo>.
@@ -220,7 +224,29 @@ fi
 #     creates these once via the DoltHub web UI.
 
 echo ""
-echo "── Phase 3: DoltHub remotes ─────────────────────────────────────────────"
+echo "── Phase 3: Remote sync ─────────────────────────────────────────────────"
+
+# hq: verify git-based sync remote is reachable (configured via .beads/config.yaml)
+if [ -d "$CITY_DIR/.beads" ]; then
+  hq_remote=$(cd "$CITY_DIR" && bd dolt remote list 2>/dev/null | awk '/^origin/ {print $2}')
+  case "$hq_remote" in
+    git+https://*)
+      remote_git_url="${hq_remote#git+}"
+      if git ls-remote "$remote_git_url" >/dev/null 2>&1; then
+        echo "  ✓ hq: git sync remote reachable ($hq_remote)"
+      else
+        echo "  ! hq: git sync remote UNREACHABLE ($hq_remote)"
+        echo "    check gh auth and that the repo exists"
+      fi
+      ;;
+    "")
+      echo "  ! hq: no bd remote configured (expected git+https://...)"
+      ;;
+    *)
+      echo "  ! hq: unexpected remote scheme ($hq_remote) — expected git+https://..."
+      ;;
+  esac
+fi
 
 # Verify dolt creds
 if ! dolt creds check >/dev/null 2>&1; then
@@ -231,11 +257,9 @@ else
   echo "✓ dolt authenticated as $DOLTHUB_USER"
 
   # Per-rig remote configuration. DoltHub repo pattern follows:
-  #   safety-chain/<github-user>-gas-city-<suffix>
-  # hq    → <github-user>-gas-city-hq
-  # rigs  → <github-user>-gas-city-<rig-name>-rig
+  #   safety-chain/<github-user>-gas-city-<rig-name>-rig
+  # hq is intentionally excluded — it uses git-based JSONL sync (above).
   REMOTES=(
-    "${CITY_DIR}|hq|${GH_USER}-gas-city-hq"
     "${PARENT_DIR}/enterprise|sc|${GH_USER}-gas-city-enterprise-rig"
     "${PARENT_DIR}/design-system|de|${GH_USER}-gas-city-designsystem-rig"
   )
