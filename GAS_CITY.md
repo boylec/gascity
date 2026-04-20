@@ -19,7 +19,7 @@ Mayor slings mol-sc-idea-to-plan to a polecat-opus-max-1m coordinator
 Coordinator produces a reviewed plan (PRD + design + review legs + gate)
       │
       ▼
-Casey approves via mail → convoy + beads created, Linear-linked
+The human approves via mail → convoy + beads created, Linear-linked
       │
       ▼
 Mayor slings mol-sc-sling-convoy → polecats (sonnet by default, opus-high
@@ -100,7 +100,7 @@ referenced is stale.
   refinery (`city.toml` `[[rigs.overrides]]`).
 - **No feature branches.** Polecats rebase onto boylec/develop, commit,
   push directly (`--merge=direct`). No merge queue, no PRs.
-- Casey accumulates all work on `boylec/develop`, then raises the branch
+- the human accumulates all work on `boylec/develop`, then raises the branch
   to `develop` (or upstream main) when ready.
 - **Commit suffix**: `[SAF-XX]` if Linear-linked, else `[<bead-id>]`.
   Never `Closes SAF-XX` / `Fixes SAF-XX` on PR bodies — Gas City
@@ -137,7 +137,7 @@ referenced is stale.
 
 ## Notification and reply channels
 
-**Outbound (agents → Casey):** `assets/scripts/sc-notify-human.sh "<subject>" "<body>"`.
+**Outbound (agents → the human):** `assets/scripts/sc-notify-human.sh "<subject>" "<body>"`.
 Fans out to:
 
 1. `gc mail send human` for inbox audit trail
@@ -150,7 +150,7 @@ Do **not** rely on `gc mail send human --notify` alone — `--notify` is a
 no-op for the `human` recipient in this Gas City version (tracked
 upstream in `examples/gastown/FUTURE.md`).
 
-**Inbound (Casey → coordinator):** mail-based, not live conversation.
+**Inbound (the human → coordinator):** mail-based, not live conversation.
 When a formula step pauses waiting for you, it emits the exact reply
 command. Typical form:
 
@@ -206,13 +206,13 @@ that subject and acts on the body.
   Linear is the "where do ideas come from" system; beads are "how we
   split implementation". The linkage is many-to-one, intentional.
 - **No feature branches, no merge queue.** Direct push to
-  boylec/develop. Casey owns the branch's integrity and promotes it to
+  boylec/develop. The human owns the branch's integrity and promotes it to
   `develop` when ready.
 - **No first-class push notifications from Gas City itself.** Delegated
   to `sc-notify-human.sh`. When upstream adds it, we swap the helper's
   body.
 - **No automatic Linear Done transitions.** Mayor moves issues to "In
-  Review"; Casey moves them to "Done" manually after human review.
+  Review"; the human moves them to "Done" manually after human review.
 
 ## Where to change what
 

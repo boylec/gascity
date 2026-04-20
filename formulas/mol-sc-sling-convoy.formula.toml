@@ -1,8 +1,9 @@
 description = '''
 SafetyChain convoy dispatch formula. Walks every open child of a convoy,
-classifies each bead by complexity (trivial / sonnet-default / opus-high),
-and slings it to the matching polecat variant with
-mol-polecat-work-monorepo. Resume-safe: skips beads already in_progress.
+picks the right polecat variant per bead (reading `metadata.agent_tier`
+stamped by the Quartermaster at plan time, with a regex fallback for
+unstamped beads), and slings it with mol-polecat-work-monorepo.
+Resume-safe: skips beads already in_progress.
 
 Use this instead of the ad-hoc inline walk from sc-policy.md.tmpl when the
 convoy has more than a handful of beads, or when you want an auditable
@@ -92,21 +93,34 @@ jq -c '.[]' ".convoy-logs/{{convoy_id}}/open-children.json" \
     TITLE=$(printf '%s' "$ROW" | jq -r '.title // ""')
     DESC=$(printf '%s' "$ROW" | jq -r '.description // ""')
     TEXT=$(printf '%s\n%s' "$TITLE" "$DESC" | tr '[:upper:]' '[:lower:]')
+    TIER_META=$(printf '%s' "$ROW" | jq -r '.metadata.agent_tier // ""')
 
-    # Classification (grep-style heuristic; refine as needed)
+    VARIANT=""
     TRIVIAL="false"
-    VARIANT="polecat-sonnet"
     WORK_FORMULA="mol-polecat-work-monorepo"
 
-    # Trivial: single-file / typo / version bump / config rename / comment-only
-    if printf '%s' "$TEXT" | grep -qE 'typo|version bump|bump dependency|rename (the )?(config|string|variable|constant)|comment.only|trivial doc|doc (fix|typo)'; then
-      TRIVIAL="true"
+    # Prefer the Quartermaster-stamped tier (see mol-sc-idea-to-plan create-beads).
+    case "$TIER_META" in
+      sonnet)      VARIANT="polecat-sonnet" ;;
+      opus-high)   VARIANT="polecat-opus-high" ;;
+      opus-max-1m) VARIANT="polecat-opus-max-1m" ;;
+      "")          : ;;   # fall through to regex
+      *) echo "unknown agent_tier=$TIER_META on $BEAD; falling back to regex" >&2 ;;
+    esac
+
+    if [ -z "$VARIANT" ]; then
+      # Regex fallback for beads created before the tier-stamping contract.
+      VARIANT="polecat-sonnet"
+      if printf '%s' "$TEXT" | grep -qE 'architecture|migration|cross.cutting|new subsystem|hard debug|security.sensitive|data model|schema change|rewrite|refactor across'; then
+        VARIANT="polecat-opus-high"
+      fi
     fi
 
-    # Escalate to opus-high when text shows complexity signals
-    if printf '%s' "$TEXT" | grep -qE 'architecture|migration|cross.cutting|new subsystem|hard debug|security.sensitive|data model|schema change|rewrite|refactor across'; then
-      VARIANT="polecat-opus-high"
-      TRIVIAL="false"
+    # Trivial flag: only the sonnet tier can skip ralph. Opus tiers always get ralph.
+    if [ "$VARIANT" = "polecat-sonnet" ]; then
+      if printf '%s' "$TEXT" | grep -qE 'typo|version bump|bump dependency|rename (the )?(config|string|variable|constant)|comment.only|trivial doc|doc (fix|typo)'; then
+        TRIVIAL="true"
+      fi
     fi
 
     # Tests-first beads prefer the TDD variant
@@ -134,7 +148,7 @@ id = "summary"
 title = "Report dispatch summary to the human"
 needs = ["classify-and-sling"]
 description = '''
-Tally the dispatch log and send a single summary notification so Casey
+Tally the dispatch log and send a single summary notification so the human
 knows the convoy is in flight without needing to watch.
 
 ```bash
@@ -160,7 +174,7 @@ EOF
 "$GC_CITY_DIR/assets/scripts/sc-notify-human.sh" "$SUBJECT" "$BODY"
 ```
 
-Exit criteria: Casey receives a single consolidated notification with the
+Exit criteria: the human receives a single consolidated notification with the
 dispatch shape. Polecats are running; refinery (or direct push) takes over
 per polecat completion.
 '''

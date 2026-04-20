@@ -244,7 +244,7 @@ reconciliation order pick it up later:
 bd note {{convoy}} "Linear $LINEAR_ID transitioned to In Review on convoy close."
 ```
 
-**4. Notify Casey (separate from notify-overseer because that mail is
+**4. Notify the human (separate from notify-overseer because that mail is
 targeted at mayor, not human).**
 
 ```bash

@@ -106,7 +106,7 @@ description = '''
 The dog runs this order every 10 minutes. Most runs find zero work.
 Notify the human only when:
 
-- Successes > 0 (so Casey sees Linear state catching up), OR
+- Successes > 0 (so the human sees Linear state catching up), OR
 - Failures > 0 repeatedly (suggesting MCP auth issue or API outage).
 
 ```bash
@@ -120,6 +120,6 @@ Notify the human only when:
 Keeping this order quiet on the happy path (no work to do) prevents
 notification spam — the dog runs every 10m across many convoys.
 
-Exit criteria: Casey is informed of meaningful state changes without
+Exit criteria: the human is informed of meaningful state changes without
 being spammed by empty passes.
 '''

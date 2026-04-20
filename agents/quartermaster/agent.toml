@@ -1,0 +1,11 @@
+scope = "city"
+provider = "claude-opus-max-1m"
+wake_mode = "fresh"
+work_dir = ".gc/agents/quartermaster/{{.AgentBase}}"
+prompt_template = "agents/quartermaster/prompt.template.md"
+nudge = "Check mail and hook status, then act accordingly."
+overlay_dir = ".gc/system/packs/gastown/overlays/default"
+idle_timeout = "24h"
+min_active_sessions = 0
+max_active_sessions = 3
+namepool = ".gc/system/packs/gastown/namepools/mad-max.txt"

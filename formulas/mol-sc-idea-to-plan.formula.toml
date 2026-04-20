@@ -14,18 +14,31 @@ SafetyChain wrapper over mol-idea-to-plan. Adds two behaviors:
 
 ## Pre-slinging contract (mayor's responsibility, not the formula's)
 
+This formula runs inside a **Quartermaster** session on opus-max-1m — NOT
+in the mayor's session. The mayor delegates to `hq/quartermaster` so that
+multiple plans can run in parallel without blocking mayor coordination.
+
 Before the mayor slings this formula, if the work came from a Linear issue:
 
 - Call linear-server -> get_issue to pull title + description + linked PRD
 - Synthesize problem + context text from those fields
 - Call linear-server -> save_issue state="In Progress" to mark it claimed
-- Sling with --var linear_id=SAF-XX --var problem="..." --var context="..."
+- Sling to the Quartermaster pool:
+  `gc sling hq/quartermaster mol-sc-idea-to-plan --formula \
+    --var linear_id=SAF-XX --var problem="..." --var context="..."`
 
 If the work is free-text (no Linear issue):
 
-- Sling with --var problem="..." --var context="..." (omit linear_id)
+- Sling to the Quartermaster pool:
+  `gc sling hq/quartermaster mol-sc-idea-to-plan --formula \
+    --var problem="..." --var context="..."` (omit linear_id)
 
-See template-fragments/sc-policy.md.tmpl for the entry-mode detection rule.
+Mayor returns the new Quartermaster session id to the human (so the human knows
+where to send approval mail) and then stops — does NOT wait for the plan
+to finish.
+
+See template-fragments/sc-policy.md.tmpl for the entry-mode detection rule
+and the Quartermaster delegation protocol.
 
 ## Pipeline
 
@@ -46,12 +59,12 @@ default = ""
 
 [[steps]]
 id = "sc-plan-approval"
-title = "Notify Casey, wait for mail-based approval reply"
+title = "Notify the human, wait for mail-based approval reply"
 needs = ["plan-review-3"]
 description = '''
 Final human gate. Presents the reviewed plan, fires multi-channel
 notification, and waits for an async reply via mail. Does not block the
-live conversation or assume Casey is attached to the coordinator session.
+live conversation or assume the human is attached to the coordinator session.
 
 **1. Assemble the approval packet.**
 
@@ -85,7 +98,7 @@ EOF
 ```
 
 **3. Also post the same summary into the live conversation** so an
-attached Casey sees it immediately.
+attached the human sees it immediately.
 
 **4. Wait for an approval reply via mail** (poll every 60s, hard timeout 24h).
 
@@ -117,12 +130,12 @@ gc mail mark-read "$ID"
 - Starts with `request-changes` -> extract notes after the colon, append
   to `.plan-reviews/$REVIEW_ID/change-requests.md`, re-run plan-review-3
   steps with updated inputs, then re-enter this step. Max 2
-  request-changes iterations before re-notifying Casey and staying blocked
+  request-changes iterations before re-notifying the human and staying blocked
   until an explicit y or abort.
 - `abort` -> close the run cleanly. If linear_id is set, leave the Linear
-  issue in "In Progress" (Casey manages manually); do not silently
+  issue in "In Progress" (the human manages manually); do not silently
   transition back to Backlog.
-- Anything else -> mail Casey back asking for a valid answer, re-enter
+- Anything else -> mail the human back asking for a valid answer, re-enter
   the wait loop.
 '''
 
@@ -179,6 +192,26 @@ Each task bead should include:
 
 Prefer thin vertical slices over giant phases.
 
+For each slice, also decide the polecat tier that will implement it. You
+have the full design doc in context right now — this is the moment to
+make that call deliberately. The downstream `mol-sc-sling-convoy` formula
+will honor `metadata.agent_tier` and only fall back to regex heuristics
+when it is unset.
+
+Tier rubric (see template-fragments/sc-policy.md.tmpl for the canonical
+version):
+
+- `sonnet` — default. Bounded area, straightforward implementation, clear
+  acceptance criteria.
+- `opus-high` — design judgment required, cross-cutting, non-trivial
+  tests, security-sensitive, or the design doc flagged the slice as
+  complex.
+- `opus-max-1m` — needs the full design doc + surrounding code in
+  context: large refactors, novel subsystems, data-model migrations.
+
+Default to `sonnet`. Only escalate when you can name the specific
+complexity signal from the design doc that forces it.
+
 ```bash
 TASK_ID=$(bd create --title "<slice title>" --description "<slice desc>" \
                     --type task --priority 2 --json | jq -r .id)
@@ -187,6 +220,12 @@ if [ -n "{{linear_id}}" ]; then
     --set-metadata linear_id={{linear_id}} \
     --external-ref linear-{{linear_id}}
 fi
+
+# Stamp the tier decision. TIER is one of: sonnet | opus-high | opus-max-1m.
+TIER="sonnet"   # change per the rubric above for this specific slice
+bd update "$TASK_ID" --set-metadata agent_tier="$TIER"
+bd label add "$TASK_ID" "tier:$TIER"
+
 gc convoy add "$CONVOY" "$TASK_ID"
 ```
 

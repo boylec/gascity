@@ -7,13 +7,36 @@ notified when their input is needed.
 
 ### Entry-mode detection (mayor only)
 
-When Casey asks the mayor to plan something, inspect the request:
+When the human asks the mayor to plan something, **delegate to the
+Quartermaster pool** — do NOT run `mol-sc-idea-to-plan` inline in Mayor's
+session. Mayor has `max_active_sessions=1` and the plan gate waits up to
+24h on the human's approval mail; running planning inline blocks Mayor from
+all other coordination work.
+
+Inspect the request, then sling to `hq/quartermaster`:
 
 - Contains a Linear issue ID matching `SAF-\d+` → **Linear path**. Extract
-  the ID. Sling `mol-sc-idea-to-plan` passing `--var linear_id=SAF-XX`.
-- No Linear ID → **free-text path**. Sling `mol-sc-idea-to-plan` passing
-  `--var problem="<exact user text>"` and optionally
-  `--var context="<supplementary info>"`. Do not invent or guess a Linear ID.
+  the ID. Call `linear-server get_issue` to pull title + description;
+  synthesize problem + context strings; call `linear-server save_issue`
+  with `state="In Progress"`. Then:
+  ```bash
+  gc sling hq/quartermaster mol-sc-idea-to-plan --formula \
+    --var linear_id=SAF-XX \
+    --var problem="<synthesized problem>" \
+    --var context="<synthesized context>"
+  ```
+- No Linear ID → **free-text path**. Sling with problem + context only:
+  ```bash
+  gc sling hq/quartermaster mol-sc-idea-to-plan --formula \
+    --var problem="<exact user text>" \
+    --var context="<supplementary info>"
+  ```
+  Do not invent or guess a Linear ID.
+
+Reply to the human with the new Quartermaster session ID so they know where to
+send approval mail. Then stop — do not wait for the plan to finish. A
+single Quartermaster pool can run up to 3 plans in parallel; check
+`gc session list` before reporting a "no slot available" state.
 
 Both paths produce the same downstream artifact (reviewed plan plus a
 convoy of beads). Only the Linear path triggers MCP state transitions and
@@ -27,10 +50,40 @@ Three variants exist in every rig, bound to Claude provider presets:
 |---|---|---|
 | `polecat-sonnet` | claude-sonnet, effort=medium | default implementation; parallel review legs; plain mechanical work once a plan is good |
 | `polecat-opus-high` | claude-opus-high, effort=high | implementation that mentions architecture, migration, cross-cutting, new subsystem, hard debug, security-sensitive, data model |
-| `polecat-opus-max-1m` | claude-opus-max-1m, effort=max, model=opus[1m] | planning coordinator (runs `mol-sc-idea-to-plan`); deep reasoning with 1M context for PRD and many review legs |
+| `polecat-opus-max-1m` | claude-opus-max-1m, effort=max, model=opus[1m] | implementation slices that need 1M context — large refactors, cross-subsystem rewrites, data-model migrations where the whole design doc + surrounding code must be in scope |
 
 Default to sonnet. Escalate to opus-high only when bead text shows
-complexity signals. Planning coordinators always use opus-max-1m.
+complexity signals. Reserve opus-max-1m for implementation work that
+genuinely needs the full 1M window; everyday "complex" work is opus-high.
+
+**Planning does not run on any polecat variant.** It runs on the
+city-scoped `hq/quartermaster` agent (also `claude-opus-max-1m`), which
+is what Mayor delegates to on every plan request — see "Entry-mode
+detection" above. Polecats implement slices; Quartermaster plans them.
+
+### Agent-tier stamping (Quartermaster, during `create-beads`)
+
+When `mol-sc-idea-to-plan` reaches the `create-beads` step, the
+Quartermaster must stamp `metadata.agent_tier` + a `tier:<x>` label on
+every task bead. This is a deliberate per-slice decision made with the
+design doc in context — the downstream sling formula honors it instead
+of re-deriving from bead text.
+
+| Tier | Use for |
+|---|---|
+| `sonnet` | Default. Vertical slice touches a bounded area, straightforward implementation, clear acceptance criteria. |
+| `opus-high` | Design judgment required, cross-cutting, non-trivial tests, security-sensitive, or the design doc flagged the slice as complex. |
+| `opus-max-1m` | Needs the full design doc + surrounding code in context: large refactors, novel subsystems, data-model migrations, anything that wouldn't fit in a normal context window. |
+
+Stamp each task bead:
+
+```bash
+bd update "$TASK_ID" --set-metadata agent_tier=$TIER
+bd label add "$TASK_ID" "tier:$TIER"
+```
+
+Default to `sonnet`. Only escalate when you can name the specific
+complexity signal from the design doc that forces it.
 
 ### Convoy dispatch procedure (mayor)
 
@@ -87,7 +140,7 @@ the decision in bead notes either way.
 
 ### Human notification and async reply
 
-Any workflow step that pauses waiting for Casey must call:
+Any workflow step that pauses waiting for the human must call:
 
 ```bash
 assets/scripts/sc-notify-human.sh "<subject>" "<body>"
@@ -100,7 +153,7 @@ notifications, an optional outbound webhook (`$SC_NOTIFY_WEBHOOK`), a
 tmux bell when attached, and an inbox mail for audit trail.
 
 The reply channel is **mail**, not live conversation. The coordinator
-polecat runs in its own tmux session; Casey is usually not attached.
+polecat runs in its own tmux session; the human is usually not attached.
 Include in every notification body the exact reply command:
 
 ```
@@ -109,7 +162,7 @@ gc mail send <COORDINATOR_SESSION> -s "<gate-name>" -m "y|request-changes: ...|a
 
 The paused polecat polls its own inbox (60 s cadence) for mail with the
 expected subject, then acts on the body. Never block on live-conversation
-input that requires Casey to be attached.
+input that requires the human to be attached.
 
 ### Standing rules
 
