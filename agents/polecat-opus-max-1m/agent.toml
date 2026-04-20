@@ -1,5 +1,5 @@
 scope = "rig"
-provider = "claude-opus-max-1m"
+provider = "claude-opus-max"
 wake_mode = "fresh"
 work_dir = ".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"
 prompt_template = ".gc/system/packs/gastown/prompts/polecat.md.tmpl"

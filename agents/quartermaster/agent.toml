@@ -1,5 +1,5 @@
 scope = "city"
-provider = "claude-opus-max-1m"
+provider = "claude-opus-max"
 wake_mode = "fresh"
 work_dir = ".gc/agents/quartermaster/{{.AgentBase}}"
 prompt_template = "agents/quartermaster/prompt.template.md"

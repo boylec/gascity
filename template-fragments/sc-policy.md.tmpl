@@ -50,14 +50,14 @@ Three variants exist in every rig, bound to Claude provider presets:
 |---|---|---|
 | `polecat-sonnet` | claude-sonnet, effort=medium | default implementation; parallel review legs; plain mechanical work once a plan is good |
 | `polecat-opus-high` | claude-opus-high, effort=high | implementation that mentions architecture, migration, cross-cutting, new subsystem, hard debug, security-sensitive, data model |
-| `polecat-opus-max-1m` | claude-opus-max-1m, effort=max, model=opus[1m] | implementation slices that need 1M context — large refactors, cross-subsystem rewrites, data-model migrations where the whole design doc + surrounding code must be in scope |
+| `polecat-opus-max-1m` | claude-opus-max, effort=max, model=opus[1m] | implementation slices that need 1M context — large refactors, cross-subsystem rewrites, data-model migrations where the whole design doc + surrounding code must be in scope |
 
 Default to sonnet. Escalate to opus-high only when bead text shows
 complexity signals. Reserve opus-max-1m for implementation work that
 genuinely needs the full 1M window; everyday "complex" work is opus-high.
 
 **Planning does not run on any polecat variant.** It runs on the
-city-scoped `hq/quartermaster` agent (also `claude-opus-max-1m`), which
+city-scoped `hq/quartermaster` agent (also `claude-opus-max`), which
 is what Mayor delegates to on every plan request — see "Entry-mode
 detection" above. Polecats implement slices; Quartermaster plans them.
 

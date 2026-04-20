@@ -33,15 +33,13 @@ effort = "high"
 model = "opus"
 permission_mode = "unrestricted"
 
-[providers.claude-opus-max-1m]
+[providers.claude-opus-max]
 base = "claude"
 ready_delay_ms = 0
-# 1M-context Opus isn't in the built-in claude schema's `model` enum.
-# Pass the model flag directly to the claude CLI via args_append.
-args_append = ["--model", "claude-opus-4-7[1m]"]
 
-[providers.claude-opus-max-1m.option_defaults]
+[providers.claude-opus-max.option_defaults]
 effort = "max"
+model = "opus"
 permission_mode = "unrestricted"
 
 [providers.claude-sonnet]

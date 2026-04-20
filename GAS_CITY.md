@@ -79,7 +79,7 @@ Three polecat variants are stamped into every rig (see `pack.toml` and `agents/`
 
 Model/effort are passed to the `claude` CLI via provider presets in
 `city.toml` (`[providers.claude-sonnet]`, `[providers.claude-opus-high]`,
-`[providers.claude-opus-max-1m]`).
+`[providers.claude-opus-max]`).
 
 ## Ralph usage
 
