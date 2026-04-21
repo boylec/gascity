@@ -1,12 +1,14 @@
 agent = []
 
 [workspace]
-provider = "claude"
 prefix = "hq"
+provider = "claude"
 
 [[rigs]]
 name = "enterprise"
 prefix = "sc"
+dolt_host = "127.0.0.1"
+dolt_port = "58414"
 
 [[rigs.overrides]]
 agent = "polecat"
@@ -36,11 +38,15 @@ GC_TARGET_BRANCH = "boylec/develop"
 [[rigs]]
 name = "gascity"
 prefix = "gc"
+dolt_host = "127.0.0.1"
+dolt_port = "58415"
 
 [[rigs]]
 name = "designsystem"
 prefix = "de"
 suspended = true
+dolt_host = "127.0.0.1"
+dolt_port = "53930"
 
 [session]
 startup_timeout = "180s"

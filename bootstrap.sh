@@ -198,62 +198,108 @@ else
   gc init --preserve-existing --file "$CITY_DIR/city.toml" "$CITY_DIR"
 fi
 
-# ── Phase 2b: Bind rig paths ─────────────────────────────────────────────────
+# ── Phase 2b: Bind rigs and stand up standalone Dolt endpoints ──────────────
 #
 # city.toml declares rigs by name/prefix only — paths are machine-local and
 # live in .gc/site.toml. `gc init` does NOT populate them, so we bind each
-# rig here with `gc rig add <dir> --name <name>`. Without this, the city
-# fails to start with: init: validate rigs: rig "<name>": path is required.
+# rig here with `gc rig add <dir> --name <name>`.
+#
+# Per-rig Dolt topology (all rigs are standalone — `endpoint_origin: explicit`):
+#   enterprise   → 127.0.0.1:58414, seeded from DoltHub
+#   designsystem → 127.0.0.1:53930, seeded from DoltHub
+#   gascity      → 127.0.0.1:58415, embedded (no remote)
+#
+# For each rig:
+#   1. gc rig add (creates scaffolding; may init DB in city's central dolt dir)
+#   2. Relocate / clone DB into <rig>/.beads/dolt/<prefix>/
+#   3. bd dolt start (spawn rig-local Dolt sql-server on pinned port)
+#   4. gc rig set-endpoint --external (pins the endpoint + verifies reachable)
 
 echo ""
-echo "Binding rig paths to .gc/site.toml..."
+echo "Binding rigs and standing up standalone Dolt endpoints..."
 
-# Map rig name → local path. Includes gascity (outside PARENT_DIR, see top).
+# Map: name | path | port | prefix | dolthub_repo_suffix (empty = no remote)
 RIG_BINDINGS=(
-  "enterprise|${PARENT_DIR}/enterprise"
-  "designsystem|${PARENT_DIR}/design-system"
-  "gascity|${GASCITY_RIG_DIR}"
+  "enterprise|${PARENT_DIR}/enterprise|58414|sc|enterprise-rig"
+  "designsystem|${PARENT_DIR}/design-system|53930|de|designsystem-rig"
+  "gascity|${GASCITY_RIG_DIR}|58415|gc|"
 )
 
-bind_rig() {
+rig_current_path() {
   local name="$1"
-  local path="$2"
-
-  if [ ! -d "$path" ]; then
-    echo "  ⚠ $name: directory missing at $path — skipping bind"
-    return
-  fi
-
-  # `gc rig list` prints "Path:   <value>" under each rig block. Empty value
-  # means no site.toml binding yet. Use awk to extract the path for this rig.
-  local current_path
-  current_path=$(gc rig list 2>/dev/null | awk -v name="$name" '
+  gc rig list 2>/dev/null | awk -v name="$name" '
     $0 ~ "^  " name ":" || $0 ~ "^  " name " " { in_block=1; next }
     in_block && /^  [^ ]/ { in_block=0 }
     in_block && /^    Path:/ { sub(/^    Path:[[:space:]]*/, ""); print; exit }
-  ')
+  '
+}
 
-  if [ "$current_path" = "$path" ]; then
-    echo "  ✓ $name → $path (already bound)"
+provision_rig() {
+  local name="$1" path="$2" port="$3" prefix="$4" repo_suffix="$5"
+
+  if [ ! -d "$path" ]; then
+    echo "  ⚠ $name: directory missing at $path — skipping"
     return
   fi
 
-  if [ -n "$current_path" ] && [ "$current_path" != "$path" ]; then
-    echo "  ~ $name: rebinding ($current_path → $path)"
+  # 1. Register rig in site.toml (idempotent)
+  local current_path
+  current_path=$(rig_current_path "$name")
+  if [ "$current_path" = "$path" ]; then
+    echo "  ✓ $name: rig bound"
   else
-    echo "  + $name → $path"
+    echo "  + $name: binding $path"
+    gc rig add "$path" --name "$name" 2>&1 | sed 's/^/      /' || \
+      { echo "      ! gc rig add failed"; return; }
   fi
 
-  if gc rig add "$path" --name "$name" 2>&1 | sed 's/^/    /'; then
-    :
-  else
-    echo "    ! gc rig add failed for $name"
+  # 2. Ensure rig-local DB dir. If gc rig add placed the DB under the city's
+  # central .beads/dolt/<prefix>/, relocate it. If the rig is DoltHub-backed
+  # and local is empty, clone from DoltHub to seed real data.
+  local rig_dolt_dir="$path/.beads/dolt/$prefix"
+  local city_dolt_dir="$CITY_DIR/.beads/dolt/$prefix"
+
+  if [ ! -d "$rig_dolt_dir/.dolt" ]; then
+    if [ -d "$city_dolt_dir/.dolt" ]; then
+      echo "  → $name: relocating DB from city central to rig-local"
+      mkdir -p "$path/.beads/dolt"
+      mv "$city_dolt_dir" "$rig_dolt_dir"
+    elif [ -n "$repo_suffix" ] && dolt creds check >/dev/null 2>&1; then
+      local url="https://doltremoteapi.dolthub.com/safety-chain/${REPO_PREFIX:-$GH_USER}-gas-city-${repo_suffix}"
+      echo "  → $name: cloning DB from DoltHub ($url)"
+      mkdir -p "$path/.beads/dolt"
+      (cd "$path/.beads/dolt" && dolt clone "$url" "$prefix" 2>&1 | tail -1 | sed 's/^/      /') || \
+        echo "      ! clone failed; will rely on auto-init"
+      # Align local metadata.json project_id with the clone's _project_id so
+      # bd does not reject the DB for identity mismatch.
+      local remote_pid
+      remote_pid=$(cd "$rig_dolt_dir" && dolt sql -q 'SELECT value FROM metadata WHERE `key`="_project_id"' -r csv 2>/dev/null | tail -1)
+      if [ -n "$remote_pid" ] && [ -f "$path/.beads/metadata.json" ]; then
+        jq --arg pid "$remote_pid" '.project_id = $pid' "$path/.beads/metadata.json" > "$path/.beads/metadata.json.tmp" \
+          && mv "$path/.beads/metadata.json.tmp" "$path/.beads/metadata.json"
+      fi
+    fi
   fi
+
+  # 3. Start the rig's own Dolt sql-server on the pinned port (idempotent).
+  if ! nc -z 127.0.0.1 "$port" 2>/dev/null; then
+    echo "  → $name: starting Dolt sql-server on 127.0.0.1:$port"
+    (cd "$path" && bd dolt start 2>&1 | tail -1 | sed 's/^/      /') || \
+      echo "      ! dolt start failed"
+  fi
+
+  # 4. Pin the endpoint in city.toml + rig config.yaml as 'explicit'.
+  echo "  → $name: pinning external endpoint 127.0.0.1:$port"
+  gc rig set-endpoint "$name" --external --host 127.0.0.1 --port "$port" 2>&1 | \
+    grep -E 'state:|! ' | sed 's/^/      /' || true
 }
 
+# REPO_PREFIX resolution mirrors Phase 3 (DoltHub alias may differ from GH user).
+REPO_PREFIX="${GC_DOLTHUB_REPO_PREFIX:-$GH_USER}"
+
 for entry in "${RIG_BINDINGS[@]}"; do
-  IFS='|' read -r name path <<< "$entry"
-  bind_rig "$name" "$path"
+  IFS='|' read -r name path port prefix repo_suffix <<< "$entry"
+  provision_rig "$name" "$path" "$port" "$prefix" "$repo_suffix"
 done
 
 # Supervisor is in exponential back-off after the init-time validation
