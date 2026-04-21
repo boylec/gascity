@@ -162,10 +162,10 @@ echo ""
 # ── Phase 2: Initialize the city ─────────────────────────────────────────────
 #
 # `gc init` does Dolt + beads + routes + pack fetch + supervisor register in
-# one shot. But it refuses to run against a directory that already has a
-# city.toml ("already initialized"), so we move city.toml aside and pass it
-# back in via --file. `gc init` will rewrite city.toml into canonical form
-# (including renaming `name` to the dir basename); we restore from git after.
+# one shot. We pass --preserve-existing so gc init keeps our committed
+# pack.toml, city.toml, and agent prompts intact instead of overwriting them
+# with its canonical template output. Requires gc >= the release containing
+# the --preserve-existing flag (gastownhall/gascity PR for init-preserve).
 
 echo "Initializing city..."
 cd "$CITY_DIR"
@@ -177,23 +177,7 @@ else
     echo "city.toml not found in $CITY_DIR; nothing for gc init to run against."
     exit 1
   fi
-  tmp_toml="$(mktemp -t city.toml.XXXXXX)"
-  cp "$CITY_DIR/city.toml" "$tmp_toml"
-  mv "$CITY_DIR/city.toml" "$CITY_DIR/city.toml.bootstrap-bak"
-  gc init --file "$tmp_toml" "$CITY_DIR"
-  rm -f "$tmp_toml"
-
-  # gc init wrote a canonical city.toml; restore the original if we have a
-  # git-tracked version, otherwise keep gc's canonical rewrite.
-  if git -C "$CITY_DIR" ls-files --error-unmatch city.toml >/dev/null 2>&1; then
-    git -C "$CITY_DIR" checkout -- city.toml
-    rm -f "$CITY_DIR/city.toml.bootstrap-bak"
-    echo "  + restored committed city.toml (gc init's rewrite discarded)"
-  else
-    # Not tracked — keep gc's version but also keep our backup alongside.
-    echo "  ! city.toml wasn't tracked; gc init's canonical rewrite is now in place."
-    echo "    (your pre-init version is at city.toml.bootstrap-bak)"
-  fi
+  gc init --preserve-existing --file "$CITY_DIR/city.toml" "$CITY_DIR"
 fi
 
 # ── Phase 3: Remote sync setup ───────────────────────────────────────────────
