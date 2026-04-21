@@ -57,14 +57,33 @@ version = 1
 description = "Linear issue ID (e.g., SAF-123). Omit for free-text planning runs."
 default = ""
 
+[vars.require_human_approval]
+description = "If 'true', pause at sc-plan-approval and wait for mail-based approval. If 'false', skip the gate and proceed directly to create-beads. Default: 'true'."
+default = "true"
+
 [[steps]]
 id = "sc-plan-approval"
-title = "Notify the human, wait for mail-based approval reply"
+title = "Notify the human, wait for mail-based approval reply (skippable via require_human_approval=false)"
 needs = ["plan-review-3"]
 description = '''
 Final human gate. Presents the reviewed plan, fires multi-channel
 notification, and waits for an async reply via mail. Does not block the
 live conversation or assume the human is attached to the coordinator session.
+
+**0. Approval-required short-circuit.**
+
+If `require_human_approval` is `"false"`, skip notification + wait entirely
+and proceed to create-beads. This is the autonomous-run path — used when
+the mayor re-pours a previously-blocked Linear issue without needing a
+human in the loop. Any value other than `"false"` (including default
+`"true"` and empty string) preserves the human-gate behavior.
+
+```bash
+if [ "{{require_human_approval}}" = "false" ]; then
+  echo "sc-plan-approval: require_human_approval=false — skipping human gate, proceeding to create-beads"
+  exit 0
+fi
+```
 
 **1. Assemble the approval packet.**
 

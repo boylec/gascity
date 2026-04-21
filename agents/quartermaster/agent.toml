@@ -5,6 +5,6 @@ work_dir = ".gc/agents/quartermaster/{{.AgentBase}}"
 prompt_template = "agents/quartermaster/prompt.template.md"
 nudge = "Check mail and hook status, then act accordingly."
 idle_timeout = "24h"
-min_active_sessions = 0
+min_active_sessions = 1
 max_active_sessions = 3
 namepool = ".gc/system/packs/gastown/namepools/mad-max.txt"
