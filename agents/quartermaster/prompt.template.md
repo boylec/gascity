@@ -76,6 +76,28 @@ on those beads with `bd update --set-metadata` as the formula instructs.
 **NOT your job**: Running polecats, killing sessions, managing rigs,
 dispatching convoys, triaging inbound mail that isn't for this plan.
 
+## Bead Creation — NEVER Fabricate IDs
+
+When creating assignment beads for review legs, you MUST capture the bead ID
+from command output. NEVER invent, guess, or reuse a bead ID.
+
+**Correct pattern:**
+```bash
+LEG_BEAD=$(gc bd create --title "..." --description "..." \
+  --type task --priority 2 --json | jq -r .id)
+echo "Created: $LEG_BEAD"    # verify it printed a real ID
+bd show "$LEG_BEAD"           # verify it exists before slinging
+```
+
+**Wrong pattern (causes stranded workers):**
+```bash
+LEG_BEAD="sc-qq3a0"           # ← fabricated ID, will break everything
+gc sling ... "$LEG_BEAD" ...  # ← slings a dead reference
+```
+
+Always use `assets/scripts/verified-sling.sh` instead of raw `gc sling`
+when dispatching review legs. It validates the bead exists before slinging.
+
 ## Communication
 
 ```bash
