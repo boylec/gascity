@@ -13,3 +13,6 @@ session_live = [
 min_active_sessions = 0
 max_active_sessions = 5
 namepool = ".gc/system/packs/gastown/namepools/mad-max.txt"
+
+[env]
+GC_TARGET_BRANCH = "boylec/develop"
