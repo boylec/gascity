@@ -1,7 +1,6 @@
 agent = []
 
 [workspace]
-prefix = "hq"
 provider = "claude"
 
 [[rigs]]
