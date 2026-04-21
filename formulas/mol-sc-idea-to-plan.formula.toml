@@ -255,19 +255,40 @@ Model actual "X needs Y" relationships. Verify with `bd blocked`.
 **6. Record the created bead IDs in:**
 `.plan-reviews/$REVIEW_ID/beads-created.md`
 
-**7. Notify the human with the dispatch hint.**
+**7. Auto-dispatch the convoy, then notify the human.**
+
+The convoy has already cleared `sc-plan-approval` (or the autonomous path
+was explicitly opted into). There is no additional gate between "plan
+approved" and "polecats start working" — so the quartermaster hands the
+dispatch molecule to the mayor pool directly rather than leaving a
+post-it note for a human to notice.
+
+This removes the class of bug where task beads sit unrouted because the
+follow-up `gc sling ... mol-sc-sling-convoy` step was forgotten or the
+human was AFK. The mayor still owns dispatch; the quartermaster just
+hands off mechanically instead of via side-channel notification.
 
 ```bash
+# Hand dispatch off to the mayor pool. This creates a mayor-owned
+# molecule bead running mol-sc-sling-convoy, which walks the convoy's
+# children and slings each to the tier-appropriate polecat variant per
+# metadata.agent_tier stamped above.
+DISPATCH_RESULT=$(gc sling hq/mayor mol-sc-sling-convoy --formula \
+  --var convoy_id="$CONVOY" 2>&1)
+echo "dispatch-convoy: $DISPATCH_RESULT"
+
 LINK_NOTE=""
 if [ -n "{{linear_id}}" ]; then
   LINK_NOTE="Linear: {{linear_id}} (metadata stamped on convoy + beads)."
 fi
-SUBJECT="CONVOY READY: $CONVOY"
+SUBJECT="CONVOY DISPATCHED: $CONVOY"
 BODY=$(cat <<EOF
-Plan approved. Convoy $CONVOY created with N task beads.
+Plan approved. Convoy $CONVOY created with N task beads and dispatched
+to the mayor pool (mol-sc-sling-convoy). Polecats will start claiming
+beads per their agent_tier as pool slots free up.
 $LINK_NOTE
 
-Dispatch:
+Dispatch command (already run):
   gc sling hq/mayor mol-sc-sling-convoy --formula --var convoy_id=$CONVOY
 
 Artifacts live in .designs/$REVIEW_ID/ and .plan-reviews/$REVIEW_ID/.
@@ -276,6 +297,125 @@ EOF
 "$GC_CITY_DIR/assets/scripts/sc-notify-human.sh" "$SUBJECT" "$BODY"
 ```
 
-**Final output** of this workflow is a reviewed plan plus a beads DAG, not
-code. Implementation happens separately via `mol-sc-sling-convoy`.
+**Final output** of this workflow is a reviewed plan, a beads DAG, AND a
+dispatched convoy. Implementation happens in polecats via
+`mol-sc-sling-convoy`, which the mayor pool now receives automatically.
+'''
+
+# Override parent's init-run: fail fast if REVIEW_TARGET can't be resolved.
+# The parent formula echoes a warning and continues — which leaves
+# REVIEW_TARGET empty, which later causes leg beads to land unrouted (real
+# incident on 2026-04-21: 3 PRD review legs stranded with no gc.routed_to
+# because the coordinator ran from HQ without --var review_target).
+[[steps]]
+id = "init-run"
+title = "Initialize the planning run in the current repo"
+description = '''
+Anchor the run in the current repository and set up durable artifact paths.
+
+**1. Prime and move to the repo root:**
+```bash
+gc prime
+gc bd prime
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+```
+
+**2. Resolve the review target (fail fast if unresolvable):**
+```bash
+REVIEW_TARGET="{{review_target}}"
+if [ -z "$REVIEW_TARGET" ]; then
+  if [ -n "$GC_RIG" ]; then
+    REVIEW_TARGET="$GC_RIG/polecat"
+  else
+    echo "FATAL: REVIEW_TARGET unresolved. Pass --var review_target=<rig>/gastown.polecat when slinging from HQ (e.g. --var review_target=enterprise/gastown.polecat). The parent formula would continue silently — SafetyChain wrapper refuses, because unrouted leg beads strand the workflow." >&2
+  exit 1
+  fi
+fi
+COORDINATOR="$GC_AGENT"
+```
+
+**3. Pick a stable slug and create artifact directories:**
+Choose a short, descriptive `REVIEW_ID` such as `merge-queue-v2`,
+`notification-levels`, or `session-bead-audit`.
+
+```bash
+mkdir -p ".prd-reviews/$REVIEW_ID" ".designs/$REVIEW_ID" ".plan-reviews/$REVIEW_ID"
+cat > ".plan-reviews/$REVIEW_ID/state.env" <<EOF
+REVIEW_ID=$REVIEW_ID
+REVIEW_TARGET=$REVIEW_TARGET
+COORDINATOR=$COORDINATOR
+REPO_ROOT=$REPO_ROOT
+EOF
+```
+
+If you restart or compact, reuse the same `REVIEW_ID` and continue from the
+existing artifact files instead of starting over.
+'''
+
+# Override parent's prd-review: stamp gc.routed_to on every leg bead at
+# bd-update time, BEFORE the sling call. If sling fails for any reason
+# (controller hiccup, target unreachable, etc.), the bead is still
+# mechanically routed and any polecat on the pool picks it up. Also add
+# an explicit guard before the sling — redundant with init-run's check
+# but cheap, and makes failure modes clear at the dispatch site.
+[[steps]]
+id = "prd-review"
+title = "Dispatch 6 PRD review legs in parallel and synthesize the result"
+needs = ["draft-prd"]
+description = '''
+Fan out parallel PRD review using review task beads plus `mol-review-leg`.
+
+**Dispatch pattern for EVERY review leg in this workflow:**
+1. Create the assignment bead and CAPTURE its ID from command output:
+```bash
+LEG_BEAD=$(gc bd create --title "<leg title>" --description "<prompt>" \
+  --type task --priority 2 --json | jq -r .id)
+echo "Created bead: $LEG_BEAD"
+```
+2. VERIFY the bead exists (guards against fabricated IDs):
+```bash
+bd show "$LEG_BEAD"
+```
+3. Set metadata on the verified bead. **Stamp `gc.routed_to` here** — do
+   NOT rely on the sling step to do it. If the sling later fails, the bead
+   still lands in the pool and a polecat picks it up:
+```bash
+bd update "$LEG_BEAD" \
+  --set-metadata coordinator="$COORDINATOR" \
+  --set-metadata review_id="$REVIEW_ID" \
+  --set-metadata review_phase=<phase> \
+  --set-metadata review_leg=<leg> \
+  --set-metadata gc.routed_to="$REVIEW_TARGET"
+```
+4. Sling using the validated wrapper (REVIEW_TARGET must be non-empty):
+```bash
+if [ -z "$REVIEW_TARGET" ]; then
+  echo "FATAL: cannot sling leg $LEG_BEAD — REVIEW_TARGET is empty. init-run should have caught this." >&2
+  exit 1
+fi
+"$GC_CITY_DIR/assets/scripts/verified-sling.sh" "$REVIEW_TARGET" "$LEG_BEAD" --on {{review_formula}}
+```
+5. Record the bead ID in the round log
+6. Wait for completion mail or poll the bead until it closes
+7. Read the full report from the bead notes with `gc bd show "$LEG_BEAD"`
+
+⚠️ **NEVER fabricate bead IDs.** The ID MUST come from `gc bd create --json`
+output. If the create command fails or returns empty, STOP and escalate.
+
+**Standard instructions each review bead must include:**
+- read `.prd-reviews/$REVIEW_ID/prd-draft.md`
+- produce the full report in bead notes
+- mail `$COORDINATOR` when complete
+- do not push code or touch unrelated work
+
+**Create 6 legs with these focuses:**
+- `requirements`, `gaps`, `ambiguity`, `feasibility`, `scope`, `stakeholders`
+
+Record the review bead IDs in `.plan-reviews/$REVIEW_ID/prd-review-beads.tsv`.
+
+After all 6 are complete, synthesize `.prd-reviews/$REVIEW_ID/prd-review.md`
+with: Executive Summary / Before You Build: Critical Questions / Important
+But Non-Blocking / Observations and Suggestions / Confidence Assessment /
+Next Steps. Use those questions to drive the human gate in the next step.
 '''
