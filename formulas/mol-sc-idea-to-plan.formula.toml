@@ -158,6 +158,171 @@ gc mail mark-read "$ID"
   the wait loop.
 '''
 
+# Override parent's human-clarify: same mail-based async pattern as
+# sc-plan-approval. The upstream step says "ask in live chat" which only
+# works for a coordinator the human is attached to; SafetyChain's
+# quartermaster is pool-based, so the only working channel is mail.
+# Real incident 2026-04-21: SAF-446 planning stalled at this step for
+# hours because questions were posted to the quartermaster's own pool
+# chat, invisible to the human attached to mayor.
+[[steps]]
+id = "human-clarify"
+title = "Ask the human the consolidated PRD questions (mail-gated; skippable via require_human_approval=false)"
+needs = ["prd-review"]
+description = '''
+This is the mid-stream human gate. SafetyChain variant: mail-gated
+because the quartermaster runs in a pool session, not a live chat with
+the human.
+
+**0. Approval-required short-circuit.**
+
+If `require_human_approval` is `"false"`, skip the notification + wait and
+auto-populate the clarifications file by accepting the review's own
+recommendations verbatim. Autonomous path — no human in the loop.
+
+```bash
+if [ "{{require_human_approval}}" = "false" ]; then
+  echo "human-clarify: require_human_approval=false — accepting review recommendations without human gate"
+  COORD="$GC_AGENT"
+  {
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Clarifications from Human Review"
+    echo ""
+    echo "Autonomous path: \`require_human_approval=false\`. Accepting the"
+    echo "review's own recommendations verbatim. See"
+    echo "\`.prd-reviews/$REVIEW_ID/prd-review.md\` §\"Before You Build:"
+    echo "Critical Questions\" for the grounded answers."
+  } >> ".prd-reviews/$REVIEW_ID/prd-draft.md"
+  mkdir -p ".plan-reviews/$REVIEW_ID"
+  cat > ".plan-reviews/$REVIEW_ID/human-clarifications.md" <<EOF
+# Human Clarifications Checkpoint — $REVIEW_ID
+
+**Coordinator:** $COORD
+**Mode:** autonomous (require_human_approval=false)
+**Resolution:** accepted review recommendations verbatim
+
+See \`.prd-reviews/$REVIEW_ID/prd-review.md\` for the questions and the
+ADR-grounded recommended answers that were accepted.
+EOF
+  exit 0
+fi
+```
+
+**1. Assemble the question packet.**
+
+```bash
+COORD="$GC_AGENT"
+TAG="{{linear_id}}"
+[ -z "$TAG" ] && TAG="(free-text run)"
+QUESTIONS=".prd-reviews/$REVIEW_ID/clarify-questions.md"
+REVIEW=".prd-reviews/$REVIEW_ID/prd-review.md"
+
+# Extract the "Before You Build: Critical Questions" section from the review
+awk '/^## Before You Build: Critical Questions/,/^## Important But Non-Blocking/' \
+  "$REVIEW" > "$QUESTIONS"
+
+SUBJECT="PRD QUESTIONS: $TAG"
+BODY=$(cat <<EOF
+Quartermaster has consolidated PRD review questions.
+
+  Questions:    $QUESTIONS
+  Review synth: $REVIEW
+  PRD draft:    .prd-reviews/$REVIEW_ID/prd-draft.md
+
+Reply asynchronously by mailing the coordinator ($COORD):
+
+  # Accept the review's recommended answers (fastest path):
+  gc mail send $COORD -s "prd-clarify-response" -m "y"
+  # Or accept with explicit nod:
+  gc mail send $COORD -s "prd-clarify-response" -m "accept recommendations"
+
+  # Provide inline answers (numbered):
+  gc mail send $COORD -s "prd-clarify-response" -m "1. <answer>\\n2. <answer>\\n..."
+
+  # Request changes to the review synthesis first:
+  gc mail send $COORD -s "prd-clarify-response" -m "request-changes: <notes>"
+
+  # Abort the run:
+  gc mail send $COORD -s "prd-clarify-response" -m "abort"
+
+Or attach to the coordinator tmux and type in the live conversation.
+EOF
+)
+```
+
+**2. Fan out the notification (best-effort, non-blocking).**
+
+```bash
+"$GC_CITY_DIR/assets/scripts/sc-notify-human.sh" "$SUBJECT" "$BODY"
+```
+
+**3. Also post the same summary into the live conversation** so an
+attached human sees it immediately.
+
+**4. Wait for a clarify-response reply via mail** (poll every 60s, hard timeout 24h).
+
+```bash
+DEADLINE=$(( $(date +%s) + 86400 ))
+REPLY=""
+while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+  REPLY=$(gc mail inbox --json 2>/dev/null | jq -r \
+    --arg c "$COORD" \
+    '.[] | select(.to==$c and .subject=="prd-clarify-response" and .status=="unread") | "\(.id)\t\(.body)"' \
+    | head -n1)
+  [ -n "$REPLY" ] && break
+  sleep 60
+done
+```
+
+If the 24h deadline hits with no reply, re-notify once via
+sc-notify-human.sh and keep polling. Do not auto-accept.
+
+**5. Act on the reply.**
+
+```bash
+ID=$(printf '%s' "$REPLY" | cut -f1)
+ANSWER=$(printf '%s' "$REPLY" | cut -f2- | tr '[:upper:]' '[:lower:]')
+gc mail mark-read "$ID"
+```
+
+- `y` / `yes` / `accept recommendations` / `accept best recommendations` ->
+  auto-populate the clarifications section by accepting the review's own
+  recommendations verbatim (same as autonomous path above).
+- Inline numbered answers -> write the body verbatim into the
+  Clarifications section of prd-draft.md.
+- Starts with `request-changes:` -> extract notes after the colon, append
+  to `.plan-reviews/$REVIEW_ID/change-requests.md`, re-run the
+  prd-review leg synthesis with updated inputs, then re-enter this step.
+  Max 2 request-changes iterations before re-notifying and staying
+  blocked until an explicit y or abort.
+- `abort` -> close the run cleanly. If linear_id is set, leave the Linear
+  issue in "In Progress"; do not silently transition back to Backlog.
+- Anything else -> mail the human back asking for a valid answer, re-enter
+  the wait loop.
+
+**6. Write the Clarifications section + checkpoint** (whichever path above).
+
+Append to `.prd-reviews/$REVIEW_ID/prd-draft.md`:
+```markdown
+---
+
+## Clarifications from Human Review
+
+<Q&A content here — either recommendation-accept summary or inline
+ answers, formatted as markdown Q/A>
+```
+
+Create/append `.plan-reviews/$REVIEW_ID/human-clarifications.md` with a
+dated checkpoint noting the mode (accept/inline/abort) and a decision
+summary table.
+
+If the human materially changes scope, also update PRD Goals and
+Non-Goals in prd-draft.md so downstream steps (design-exploration,
+prd-align-*) see the corrected scope.
+'''
+
 # Override parent's create-beads: conditional Linear stamping, omit
 # integration/<convoy-id> target so GC_TARGET_BRANCH env wins.
 [[steps]]

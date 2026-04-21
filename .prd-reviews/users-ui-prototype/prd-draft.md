@@ -105,3 +105,36 @@ As a tenant admin, I want to see a timeline of changes to a user's account (crea
 - Confirmation dialogs for destructive actions
 - Error handling and loading states
 - Accessibility pass
+
+---
+
+## Clarifications from Human Review
+
+Response to the 6 critical questions posed in `prd-review.md`. Human directive: **"accept your best recommendations"**, grounded in the review's own ADR-based guidance.
+
+### Q1: User storage architecture — All-Keycloak or projection table?
+**A: Path A — All-Keycloak.** Expand `KeycloakAdminPort` to cover read operations. Treat Keycloak as the sole user store per **ADR-014** (Enterprise is not an IdP) and **ADR-016** (Keycloak owns user storage, Part 11 UUID preservation). Record this decision as an ADR addendum or new ADR. Defer any projection table until a concrete query-pattern need proves Keycloak Admin API latency or query semantics insufficient.
+
+### Q2: Delete semantics — hard vs soft?
+**A: Soft delete only (Keycloak disable).** Required for Part 11 compliance — preserves actor references in audit records. Remove "delete users" from Goal 2 wording; re-frame as "deactivate users." Hard delete is explicitly out of scope for this phase; revisit only with a compliance-reviewed scope proposal.
+
+### Q3: Which 7 KeycloakAdminPort operations to add?
+**A: Add all 7 listed operations.** Current adapter has `createOrganization` + `createUser` only. Add: `getUser`, `listUsersByOrganization` (paginated, offset-based per Q-Q below), `updateUser`, `enableUser`, `disableUser`, `assignRealmRoleToUser`, `removeRealmRoleFromUser`. Do **not** add `deleteUser` (see Q2). Update the PRD's effort estimate to reflect this adapter work as part of Phase 1.
+
+### Q4: Gateway routing for `/identity/users/*`?
+**A: Add an explicit route** `/identity/users/*` → `identity-api` in the gateway config. Do **not** touch existing OAuth BFF paths (`/identity/login`, `/callback`, `/logout`, `/me`, `/refresh`) — they stay on the BFF bypass per ADR-025. Only the new `/users/*` subtree gets the explicit pass-through rule.
+
+### Q5: Role naming — `QualityManager` vs `manager`?
+**A: Use `manager` (lowercase).** Matches the existing `permission-resolver.ts` `ROLE_PERMISSIONS` keys. Update all PRD text, UI copy, and role-selector options to use `manager`. Display label can still be "Quality Manager" in the UI if desired, but the underlying role identifier is `manager`.
+
+### Q6: Audit trail storage mechanism?
+**A: Primary — Keycloak events feed.** Keycloak already emits admin/event logs covering create/update/disable/enable/role-change operations. Consume those via the existing event-store wiring. Defer any SafetyChain-side projection table to Phase 3 pending concrete query-pattern requirements (e.g. if timeline UI needs joins Keycloak's feed can't serve). Document the event types subscribed and the retention policy in Phase 3 planning.
+
+### Important-but-non-blocking items (accepted as-is from review)
+
+- **Goal 6 (tenant resolution)** — rescope to "add multi-tenant switching for users in multiple Keycloak Organizations"; remove "Replace hardcoded DEFAULT_TENANT" since `requireCurrentUser()` already resolves tenant from `/me`.
+- **Repo path corrections** — update PRD to use actual DDD-hexagonal paths: `contexts/identity/infra/db/`, `contexts/identity/app/routes/`, `presentation/builder-studio/src/` per ADR-015.
+- **Frontend scaffold delta** — Phase 2-4 are frontend deltas on existing `presentation/builder-studio/src/app/identity/` scaffold; list `edit`, `reactivate`, `revoke-role`, paginated/searchable list as the concrete additions.
+- **Pagination** — offset-based (first/max) to match Keycloak Admin API and existing stack; document the pattern in Phase 1.
+- **Authorization enforcement** — MVP: gate `/identity/*` UI routes by `oc:users:manage` permission in a server component or middleware. Non-negotiable security gap otherwise.
+- **Multi-role** — confirm YES: concurrent multi-role is intended per `role_assignments` many-to-many table. Update US-2 wording ("initial role assignment" → "initial role assignments").
