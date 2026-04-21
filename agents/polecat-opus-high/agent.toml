@@ -10,6 +10,6 @@ session_live = [
     "{{.ConfigDir}}/.gc/system/packs/gastown/assets/scripts/tmux-theme.sh {{.Session}} {{.Agent}} {{.ConfigDir}}",
     "{{.ConfigDir}}/.gc/system/packs/gastown/assets/scripts/tmux-keybindings.sh {{.ConfigDir}}",
 ]
-min_active_sessions = 0
+min_active_sessions = 1
 max_active_sessions = 3
 namepool = ".gc/system/packs/gastown/namepools/mad-max.txt"
