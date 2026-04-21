@@ -6,6 +6,7 @@ provider = "claude"
 [[rigs]]
 name = "enterprise"
 prefix = "sc"
+default_sling_target = "enterprise/polecat"
 dolt_host = "127.0.0.1"
 dolt_port = "58414"
 
@@ -21,12 +22,15 @@ GC_TARGET_BRANCH = "boylec/develop"
 
 [[rigs.overrides]]
 agent = "refinery"
+min_active_sessions = 1
+max_active_sessions = 3
 [rigs.overrides.env]
 GC_TARGET_BRANCH = "boylec/develop"
 
 [[rigs]]
 name = "gascity"
 prefix = "gc"
+default_sling_target = "gascity/polecat"
 dolt_host = "127.0.0.1"
 dolt_port = "58415"
 
@@ -42,6 +46,7 @@ max_active_sessions = 3
 name = "designsystem"
 prefix = "de"
 suspended = true
+default_sling_target = "designsystem/polecat"
 dolt_host = "127.0.0.1"
 dolt_port = "53930"
 

@@ -1,4 +1,4 @@
-scope = "city"
+scope = "rig"
 provider = "claude-opus-max"
 wake_mode = "fresh"
 work_dir = ".gc/agents/quartermaster/{{.AgentBase}}"
