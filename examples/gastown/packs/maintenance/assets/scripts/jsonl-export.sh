@@ -34,7 +34,7 @@ mkdir -p "$(dirname "$STATE_FILE")"
 
 # Discover databases. Exclude Dolt/MySQL system schemas and Gas City's internal
 # health-probe database; the remaining databases are expected to be bead stores.
-DATABASES=$(dolt_sql -r csv -q "SHOW DATABASES" 2>/dev/null | tail -n +2 | grep -vi '^information_schema$\|^mysql$\|^dolt_cluster$\|^__gc_probe$' || true)
+DATABASES=$(dolt_sql -r csv -q "SHOW DATABASES" 2>/dev/null | tail -n +2 | grep -Evi '^(information_schema|mysql|dolt_cluster|__gc_probe)$' || true)
 if [ -z "$DATABASES" ]; then
     exit 0
 fi
@@ -48,8 +48,15 @@ fi
 # Build scrub filter for the issues table.
 SCRUB_FILTER=""
 if [ "$SCRUB" = "true" ]; then
-    SCRUB_FILTER="WHERE type NOT IN ('message', 'event', 'wisp', 'agent') AND title NOT LIKE 'gc:%'"
+    SCRUB_FILTER="WHERE issue_type NOT IN ('message', 'event', 'wisp', 'agent') AND title NOT LIKE 'gc:%'"
 fi
+
+# SELECT failures must NOT be silent — /dev/null masked a column-name bug
+# that dropped every DB into FAILED_DBS. Route stderr somewhere operators
+# can read it.
+ERR_LOG="$PACK_STATE_DIR/jsonl-export.err"
+mkdir -p "$PACK_STATE_DIR"
+: > "$ERR_LOG"
 
 TOTAL_EXPORTED=0
 TOTAL_DBS=0
@@ -62,7 +69,7 @@ for DB in $DATABASES; do
     mkdir -p "$DB_DIR"
 
     # Step 1: Export issues table.
-    if ! dolt_sql -r json -q "SELECT * FROM \`$DB\`.issues $SCRUB_FILTER" > "$DB_DIR/issues.jsonl" 2>/dev/null; then
+    if ! dolt_sql -r json -q "SELECT * FROM \`$DB\`.issues $SCRUB_FILTER" > "$DB_DIR/issues.jsonl" 2>>"$ERR_LOG"; then
         FAILED_DBS="${FAILED_DBS}$DB "
         continue
     fi

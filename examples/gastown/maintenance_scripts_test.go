@@ -298,6 +298,138 @@ func writeManagedRuntimeState(t *testing.T, cityDir string, port int) {
 	}
 }
 
+// writeJSONLExportDoltStub is a configurable dolt stub for jsonl-export tests.
+// DOLT_STUB_DATABASES: newline-separated DB names returned by SHOW DATABASES.
+// DOLT_STUB_SELECT_STDERR: if set, SELECT queries write this to stderr and exit 1.
+func writeJSONLExportDoltStub(t *testing.T, path string) {
+	t.Helper()
+	writeExecutable(t, path, `#!/bin/sh
+printf '%s\n' "$*" >> "$DOLT_ARGS_LOG"
+case "$*" in
+  *"SHOW DATABASES"*)
+    if [ -n "${DOLT_STUB_DATABASES:-}" ]; then
+      printf 'Database\n'
+      printf '%s\n' "$DOLT_STUB_DATABASES"
+    else
+      printf 'Database\nbeads\n'
+    fi
+    ;;
+  *"SELECT *"*)
+    if [ -n "${DOLT_STUB_SELECT_STDERR:-}" ]; then
+      printf '%s\n' "$DOLT_STUB_SELECT_STDERR" >&2
+      exit 1
+    fi
+    printf '{"id":"ga-1","title":"sample"}\n'
+    ;;
+  *"COUNT("*)
+    printf 'COUNT(*)\n0\n'
+    ;;
+  *"SELECT id"*)
+    printf 'id\n'
+    ;;
+esac
+exit 0
+`)
+}
+
+func runJSONLExport(t *testing.T, extraEnv map[string]string) (cityDir, doltLog, stateDir string) {
+	t.Helper()
+	cityDir = t.TempDir()
+	binDir := t.TempDir()
+	stateDir = t.TempDir()
+	doltLog = filepath.Join(t.TempDir(), "dolt-args.log")
+
+	writeJSONLExportDoltStub(t, filepath.Join(binDir, "dolt"))
+	writeExecutable(t, filepath.Join(binDir, "gc"), `#!/bin/sh
+exit 0
+`)
+
+	env := map[string]string{
+		"DOLT_ARGS_LOG":              doltLog,
+		"GC_CITY":                    cityDir,
+		"GC_CITY_PATH":               cityDir,
+		"GC_PACK_STATE_DIR":          stateDir,
+		"GC_DOLT_HOST":               "127.0.0.1",
+		"GC_DOLT_PORT":               "3307",
+		"GC_DOLT_USER":               "root",
+		"GC_DOLT_PASSWORD":           "",
+		"GC_JSONL_ARCHIVE_REPO":      filepath.Join(cityDir, "archive"),
+		"GC_JSONL_MAX_PUSH_FAILURES": "99",
+		"GIT_CONFIG_GLOBAL":          filepath.Join(t.TempDir(), "gitconfig"),
+		"GIT_CONFIG_NOSYSTEM":        "1",
+		"PATH":                       binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+	}
+	for k, v := range extraEnv {
+		env[k] = v
+	}
+
+	runScript(t, filepath.Join(exampleDir(), "packs", "maintenance", "assets", "scripts", "jsonl-export.sh"), env)
+	return cityDir, doltLog, stateDir
+}
+
+func TestJSONLExportFiltersSystemDatabases(t *testing.T) {
+	// SHOW DATABASES typically returns system schemas mixed with bead DBs.
+	// The script's filter must exclude information_schema, mysql, dolt_cluster,
+	// and __gc_probe so the SELECT loop only touches real bead stores.
+	_, doltLog, _ := runJSONLExport(t, map[string]string{
+		"DOLT_STUB_DATABASES": "__gc_probe\nhq\ninformation_schema\nmysql\ndolt_cluster",
+	})
+
+	data, err := os.ReadFile(doltLog)
+	if err != nil {
+		t.Fatalf("ReadFile(dolt log): %v", err)
+	}
+	log := string(data)
+
+	for _, system := range []string{"information_schema", "mysql", "dolt_cluster", "__gc_probe"} {
+		needle := "FROM `" + system + "`."
+		if strings.Contains(log, needle) {
+			t.Fatalf("system DB %q should be filtered out but appears in query log:\n%s", system, log)
+		}
+	}
+	if !strings.Contains(log, "FROM `hq`.issues") {
+		t.Fatalf("expected bead DB hq to be queried; log:\n%s", log)
+	}
+}
+
+func TestJSONLExportScrubFilterUsesIssueTypeColumn(t *testing.T) {
+	// The issues table column is named `issue_type`, not `type`. Using `type`
+	// in the WHERE clause makes every SELECT fail with "column not found" and
+	// drops every DB into FAILED_DBS with zero records exported.
+	_, doltLog, _ := runJSONLExport(t, nil)
+
+	data, err := os.ReadFile(doltLog)
+	if err != nil {
+		t.Fatalf("ReadFile(dolt log): %v", err)
+	}
+	log := string(data)
+
+	if !strings.Contains(log, "issue_type NOT IN") {
+		t.Fatalf("expected scrub filter to reference issue_type column; log:\n%s", log)
+	}
+	if strings.Contains(log, "WHERE type NOT IN") {
+		t.Fatalf("scrub filter still references bare `type` column (broken); log:\n%s", log)
+	}
+}
+
+func TestJSONLExportLogsSelectStderrToPackStateFile(t *testing.T) {
+	// When the dolt SELECT fails, stderr must land in a logfile under
+	// GC_PACK_STATE_DIR so operators can diagnose silent export failures
+	// instead of chasing a ">/dev/null" black box.
+	_, _, stateDir := runJSONLExport(t, map[string]string{
+		"DOLT_STUB_SELECT_STDERR": "Error 1105 (HY000): column \"type\" could not be found",
+	})
+
+	errLog := filepath.Join(stateDir, "jsonl-export.err")
+	data, err := os.ReadFile(errLog)
+	if err != nil {
+		t.Fatalf("expected stderr log at %s: %v", errLog, err)
+	}
+	if !strings.Contains(string(data), "column \"type\" could not be found") {
+		t.Fatalf("stderr log missing dolt error; content:\n%s", data)
+	}
+}
+
 func TestFormulaDoltSQLExamplesUseExplicitTarget(t *testing.T) {
 	examplesDir := filepath.Dir(exampleDir())
 	paths := []string{
