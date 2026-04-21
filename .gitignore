@@ -1,6 +1,5 @@
 # Gas City
 .gc/
-.beads/
 hooks/
 .runtime/
 
@@ -22,3 +21,8 @@ formulas/mol-polecat-base.toml
 formulas/mol-polecat-commit.toml
 formulas/mol-scoped-work.toml
 scripts/
+
+# Gas City
+.beads/*
+!.beads/config.yaml
+!.beads/metadata.json

@@ -12,6 +12,11 @@ set -euo pipefail
 CITY_DIR="$(cd "$(dirname "$0")" && pwd)"
 PARENT_DIR="$(dirname "$CITY_DIR")"
 
+# gascity rig is the Gas City SDK source — used for upstreaming bug fixes.
+# It's typically cloned outside PARENT_DIR (often ~/src/gastownhall/gascity),
+# so path it separately. Override via env when it lives elsewhere.
+GASCITY_RIG_DIR="${GC_GASCITY_RIG_DIR:-$HOME/src/gastownhall/gascity}"
+
 # ── Phase 0: Prerequisite check ──────────────────────────────────────────────
 # Mirrors .claude/skills/bootstrap/SKILL.md so running the script directly is
 # equivalent to running the skill.
@@ -126,6 +131,19 @@ RIGS=(
   "designsystem|https://github.com/safety-chain/design-system|${PARENT_DIR}/design-system"
 )
 
+# gascity rig is user-specific (typically a personal fork of gastownhall/gascity)
+# so bootstrap verifies presence rather than cloning. If missing, surface a
+# warning — the city won't start cleanly until the rig is bound in Phase 2b.
+if [ -d "$GASCITY_RIG_DIR/.git" ]; then
+  echo "✓ gascity already cloned at $GASCITY_RIG_DIR"
+else
+  echo "⚠ gascity rig not found at $GASCITY_RIG_DIR"
+  echo "  city.toml declares a 'gascity' rig for upstreaming SDK fixes."
+  echo "  Clone it (e.g. gh repo fork gastownhall/gascity --clone) or set"
+  echo "  GC_GASCITY_RIG_DIR, then re-run ./bootstrap.sh."
+  echo "  Continuing — city start will fail until this rig is bound."
+fi
+
 for rig in "${RIGS[@]}"; do
   IFS='|' read -r name url dir <<< "$rig"
   if [ -d "$dir" ]; then
@@ -180,15 +198,83 @@ else
   gc init --preserve-existing --file "$CITY_DIR/city.toml" "$CITY_DIR"
 fi
 
+# ── Phase 2b: Bind rig paths ─────────────────────────────────────────────────
+#
+# city.toml declares rigs by name/prefix only — paths are machine-local and
+# live in .gc/site.toml. `gc init` does NOT populate them, so we bind each
+# rig here with `gc rig add <dir> --name <name>`. Without this, the city
+# fails to start with: init: validate rigs: rig "<name>": path is required.
+
+echo ""
+echo "Binding rig paths to .gc/site.toml..."
+
+# Map rig name → local path. Includes gascity (outside PARENT_DIR, see top).
+RIG_BINDINGS=(
+  "enterprise|${PARENT_DIR}/enterprise"
+  "designsystem|${PARENT_DIR}/design-system"
+  "gascity|${GASCITY_RIG_DIR}"
+)
+
+bind_rig() {
+  local name="$1"
+  local path="$2"
+
+  if [ ! -d "$path" ]; then
+    echo "  ⚠ $name: directory missing at $path — skipping bind"
+    return
+  fi
+
+  # `gc rig list` prints "Path:   <value>" under each rig block. Empty value
+  # means no site.toml binding yet. Use awk to extract the path for this rig.
+  local current_path
+  current_path=$(gc rig list 2>/dev/null | awk -v name="$name" '
+    $0 ~ "^  " name ":" || $0 ~ "^  " name " " { in_block=1; next }
+    in_block && /^  [^ ]/ { in_block=0 }
+    in_block && /^    Path:/ { sub(/^    Path:[[:space:]]*/, ""); print; exit }
+  ')
+
+  if [ "$current_path" = "$path" ]; then
+    echo "  ✓ $name → $path (already bound)"
+    return
+  fi
+
+  if [ -n "$current_path" ] && [ "$current_path" != "$path" ]; then
+    echo "  ~ $name: rebinding ($current_path → $path)"
+  else
+    echo "  + $name → $path"
+  fi
+
+  if gc rig add "$path" --name "$name" 2>&1 | sed 's/^/    /'; then
+    :
+  else
+    echo "    ! gc rig add failed for $name"
+  fi
+}
+
+for entry in "${RIG_BINDINGS[@]}"; do
+  IFS='|' read -r name path <<< "$entry"
+  bind_rig "$name" "$path"
+done
+
+# Supervisor is in exponential back-off after the init-time validation
+# failure (10s → 20s → 40s → 1m20s → 2m40s → 5m). Nudge it so the user
+# doesn't wait up to 5 minutes for the next scheduled retry.
+if ! gc status >/dev/null 2>&1; then
+  echo ""
+  echo "Nudging supervisor to retry city startup..."
+  gc start 2>&1 | sed 's/^/  /' || true
+fi
+
 # ── Phase 3: Remote sync setup ───────────────────────────────────────────────
 #
-# hq uses a git-based JSONL sync remote (scheme git+https://...) configured in
-# .beads/config.yaml (sync.remote). That remote is committed in the repo, so
-# bootstrap only verifies reachability — it does not configure it.
+# Per-rig sync policy:
+#   - hq (city):    embedded Dolt, no remote.
+#   - gascity rig:  embedded Dolt, no remote.
+#   - enterprise:   DoltHub remote (bead store).
+#   - designsystem: DoltHub remote (bead store).
 #
-# Rigs still use DoltHub remotes. Auth uses dolt's JWK creds (created by
-# `dolt login`) — bd dolt push picks them up transparently, no PAT or
-# per-peer credential vault.
+# Auth uses dolt's JWK creds (created by `dolt login`) — bd dolt push picks
+# them up transparently, no PAT or per-peer credential vault.
 #
 # Key distinctions learned the hard way:
 #   - URL scheme MUST be https://doltremoteapi.dolthub.com/<org>/<repo>.
@@ -210,26 +296,14 @@ fi
 echo ""
 echo "── Phase 3: Remote sync ─────────────────────────────────────────────────"
 
-# hq: verify git-based sync remote is reachable (configured via .beads/config.yaml)
+# hq: embedded Dolt — expect no remote. Surface if one appears (likely leftover).
 if [ -d "$CITY_DIR/.beads" ]; then
   hq_remote=$(cd "$CITY_DIR" && bd dolt remote list 2>/dev/null | awk '/^origin/ {print $2}')
-  case "$hq_remote" in
-    git+https://*)
-      remote_git_url="${hq_remote#git+}"
-      if git ls-remote "$remote_git_url" >/dev/null 2>&1; then
-        echo "  ✓ hq: git sync remote reachable ($hq_remote)"
-      else
-        echo "  ! hq: git sync remote UNREACHABLE ($hq_remote)"
-        echo "    check gh auth and that the repo exists"
-      fi
-      ;;
-    "")
-      echo "  ! hq: no bd remote configured (expected git+https://...)"
-      ;;
-    *)
-      echo "  ! hq: unexpected remote scheme ($hq_remote) — expected git+https://..."
-      ;;
-  esac
+  if [ -z "$hq_remote" ]; then
+    echo "  ✓ hq: embedded (no remote, as expected)"
+  else
+    echo "  ! hq: unexpected remote $hq_remote — hq should be embedded"
+  fi
 fi
 
 # Verify dolt creds
