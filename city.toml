@@ -14,6 +14,8 @@ source = "./.gc/system/packs/gastown"
 
 [[rigs.overrides]]
 agent = "polecat"
+min_active_sessions = 1
+max_active_sessions = 3
 [rigs.overrides.env]
 GC_TARGET_BRANCH = "boylec/develop"
 
@@ -27,6 +29,14 @@ name = "gascity"
 prefix = "gc"
 dolt_host = "127.0.0.1"
 dolt_port = "58415"
+
+[rigs.imports.gastown]
+source = "./.gc/system/packs/gastown"
+
+[[rigs.overrides]]
+agent = "polecat"
+min_active_sessions = 1
+max_active_sessions = 3
 
 [[rigs]]
 name = "designsystem"
