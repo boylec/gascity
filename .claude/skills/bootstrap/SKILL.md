@@ -114,7 +114,11 @@ For each missing rig directory:
 
 ```bash
 BRANCH="${GH_USER}/develop"
-git clone https://github.com/safety-chain/<repo>.git <path>
+# Use `gh repo clone` — reuses the authenticated gh session (token or SSH
+# per the user's `gh config get git_protocol`). Raw `git clone https://...`
+# falls through to a password prompt when no credential helper is cached,
+# and GitHub rejects password auth for git operations.
+gh repo clone safety-chain/<repo> <path>
 
 if git -C <path> ls-remote --heads origin "$BRANCH" | grep -q "$BRANCH"; then
   git -C <path> checkout "$BRANCH"

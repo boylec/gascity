@@ -9,21 +9,21 @@ prefix = "sc"
 default_sling_target = "enterprise/polecat"
 dolt_host = "127.0.0.1"
 dolt_port = "58414"
-
+[rigs.imports]
 [rigs.imports.gastown]
 source = "./.gc/system/packs/gastown"
 
 [[rigs.overrides]]
 agent = "polecat"
-min_active_sessions = 1
 max_active_sessions = 3
+min_active_sessions = 1
 [rigs.overrides.env]
 GC_TARGET_BRANCH = "boylec/develop"
 
 [[rigs.overrides]]
 agent = "refinery"
-min_active_sessions = 1
 max_active_sessions = 3
+min_active_sessions = 1
 [rigs.overrides.env]
 GC_TARGET_BRANCH = "boylec/develop"
 
@@ -31,16 +31,14 @@ GC_TARGET_BRANCH = "boylec/develop"
 name = "gascity"
 prefix = "gc"
 default_sling_target = "gascity/polecat"
-dolt_host = "127.0.0.1"
-dolt_port = "58415"
-
+[rigs.imports]
 [rigs.imports.gastown]
 source = "./.gc/system/packs/gastown"
 
 [[rigs.overrides]]
 agent = "polecat"
-min_active_sessions = 1
 max_active_sessions = 3
+min_active_sessions = 1
 
 [[rigs]]
 name = "designsystem"
