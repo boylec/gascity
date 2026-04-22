@@ -44,13 +44,16 @@ stamps `External:` on the root bead.
 
 ### Polecat variant selection (mayor picks at sling time)
 
-Three variants exist in every rig, bound to Claude provider presets:
+Three variants exist in every rig, bound to Claude provider presets. They
+live in the `polecats` pack (`<city>/packs/polecats/`) which is imported
+per-rig via `[rigs.imports.polecats]` in city.toml, so the sling target
+format is `<rig>/polecats.<variant>`:
 
 | Variant | Provider preset | When to use |
 |---|---|---|
-| `polecat-sonnet` | claude-sonnet, effort=medium | default implementation; parallel review legs; plain mechanical work once a plan is good |
-| `polecat-opus-high` | claude-opus-high, effort=high | implementation that mentions architecture, migration, cross-cutting, new subsystem, hard debug, security-sensitive, data model |
-| `polecat-opus-max-1m` | claude-opus-max, effort=max, model=opus[1m] | implementation slices that need 1M context — large refactors, cross-subsystem rewrites, data-model migrations where the whole design doc + surrounding code must be in scope |
+| `polecats.sonnet` | claude-sonnet, effort=medium | default implementation; parallel review legs; plain mechanical work once a plan is good |
+| `polecats.opus-high` | claude-opus-high, effort=high | implementation that mentions architecture, migration, cross-cutting, new subsystem, hard debug, security-sensitive, data model |
+| `polecats.opus-max-1m` | claude-opus-max, effort=max, model=opus[1m] | implementation slices that need 1M context — large refactors, cross-subsystem rewrites, data-model migrations where the whole design doc + surrounding code must be in scope |
 
 Default to sonnet. Escalate to opus-high only when bead text shows
 complexity signals. Reserve opus-max-1m for implementation work that
@@ -102,12 +105,12 @@ for BEAD in $(bd list --parent "$CONVOY" --status=open --json | jq -r '.[].id');
   TEXT=$(printf '%s' "$META" | jq -r '.[0] | "\(.title)\n\(.description // "")"')
 
   # 2. Classify complexity
-  VARIANT="polecat-sonnet"          # default
+  VARIANT="polecats.sonnet"         # default
   TRIVIAL="false"
   # - trivial heuristic: single-file edit, typo, version bump, config/string rename,
   #   comment-only, trivial doc. If yes: TRIVIAL=true (polecat skips ralph).
   # - opus-high heuristic: architecture, migration, cross-cutting, new subsystem,
-  #   hard debug, security-sensitive, data model. If yes: VARIANT=polecat-opus-high.
+  #   hard debug, security-sensitive, data model. If yes: VARIANT=polecats.opus-high.
 
   # 3. Sling with formula + trivial metadata
   gc sling "$RIG/$VARIANT" "$BEAD" \

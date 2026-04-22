@@ -1,0 +1,12 @@
+# SafetyChain polecat variant pool — imported per-rig so that the
+# three implementation polecats (sonnet / opus-high / opus-max-1m)
+# are rig-scoped with proper worktrees and can see the rig's bead store.
+#
+# Invocation / routing targets:
+#   <rig>/polecats.sonnet       — default mechanical implementation
+#   <rig>/polecats.opus-high    — architecture / cross-cutting / security-sensitive
+#   <rig>/polecats.opus-max-1m  — jobs needing 1M context
+
+[pack]
+name = "polecats"
+schema = 2

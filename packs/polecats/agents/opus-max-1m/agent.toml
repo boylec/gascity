@@ -1,8 +1,8 @@
 scope = "rig"
-provider = "claude-opus-high"
+provider = "claude-opus-max"
 wake_mode = "fresh"
 work_dir = ".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"
-prompt_template = ".gc/system/packs/gastown/agents/polecat/prompt.template.md"
+prompt_template = "../../.gc/system/packs/gastown/agents/polecat/prompt.template.md"
 nudge = "Run gc hook; it checks assigned work first, then routed pool work."
 pre_start = ["{{.ConfigDir}}/.gc/system/packs/gastown/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 idle_timeout = "2h"
@@ -10,9 +10,9 @@ session_live = [
     "{{.ConfigDir}}/.gc/system/packs/gastown/assets/scripts/tmux-theme.sh {{.Session}} {{.Agent}} {{.ConfigDir}}",
     "{{.ConfigDir}}/.gc/system/packs/gastown/assets/scripts/tmux-keybindings.sh {{.ConfigDir}}",
 ]
-min_active_sessions = 0
-max_active_sessions = 3
-namepool = ".gc/system/packs/gastown/namepools/mad-max.txt"
+min_active_sessions = 1
+max_active_sessions = 2
+namepool = "../../.gc/system/packs/gastown/namepools/mad-max.txt"
 
 [env]
 GC_TARGET_BRANCH = "boylec/develop"
