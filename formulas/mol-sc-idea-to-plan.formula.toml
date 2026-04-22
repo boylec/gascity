@@ -23,15 +23,26 @@ Before the mayor slings this formula, if the work came from a Linear issue:
 - Call linear-server -> get_issue to pull title + description + linked PRD
 - Synthesize problem + context text from those fields
 - Call linear-server -> save_issue state="In Progress" to mark it claimed
+- Determine the target rig from the Linear team/prefix (e.g., SAF-* →
+  enterprise, GC-* → gascity, DE-* → designsystem)
 - Sling to the Quartermaster pool:
   `gc sling hq/quartermaster mol-sc-idea-to-plan --formula \
+    --var target_rig=enterprise \
     --var linear_id=SAF-XX --var problem="..." --var context="..."`
 
 If the work is free-text (no Linear issue):
 
+- Ask the human which rig the implementation targets (enterprise / gascity /
+  designsystem) and pass it as --var target_rig=<rig-name>.
 - Sling to the Quartermaster pool:
   `gc sling hq/quartermaster mol-sc-idea-to-plan --formula \
+    --var target_rig=<rig> \
     --var problem="..." --var context="..."` (omit linear_id)
+
+`target_rig` is required — without it, implementation beads get created
+in the QM's city-scoped bead store (hq-*) instead of the rig that will
+implement the work. That splits the feature bead from its rig's backlog
+and hides the work from `bd list` / `bd ready` in the owning rig.
 
 Mayor returns the new Quartermaster session id to the human (so the human knows
 where to send approval mail) and then stops — does NOT wait for the plan
@@ -53,6 +64,10 @@ extends = ["mol-idea-to-plan"]
 version = 1
 
 [vars]
+[vars.target_rig]
+description = "Rig that will implement the resulting beads (e.g., 'enterprise'). Determines which rig's bead store holds the convoy + task beads. Required."
+required = true
+
 [vars.linear_id]
 description = "Linear issue ID (e.g., SAF-123). Omit for free-text planning runs."
 default = ""
@@ -338,10 +353,22 @@ Turn the approved plan into executable work.
 cat ".designs/$REVIEW_ID/design-doc.md"
 ```
 
-**2. Create an owned convoy for the initiative.**
+All bd/gc commands in the remaining steps MUST target the implementing
+rig so the convoy + beads land in that rig's store — not QM's city
+store. Capture it once:
 
 ```bash
-CONVOY=$(gc convoy create "<initiative-name>" --owned --json | jq -r .id)
+RIG="{{target_rig}}"
+if [ -z "$RIG" ]; then
+  echo "target_rig is required; got empty. Mayor must sling this formula with --var target_rig=<rig>."
+  exit 2
+fi
+```
+
+**2. Create an owned convoy for the initiative (in the target rig).**
+
+```bash
+CONVOY=$(gc convoy --rig "$RIG" create "<initiative-name>" --owned --json | jq -r .id)
 ```
 
 Do NOT call `gc convoy target $CONVOY integration/$CONVOY`. SafetyChain
@@ -359,10 +386,10 @@ Record references to:
 
 ```bash
 if [ -n "{{linear_id}}" ]; then
-  bd update "$CONVOY" \
+  bd --rig "$RIG" update "$CONVOY" \
     --set-metadata linear_id={{linear_id}} \
     --external-ref linear-{{linear_id}}
-  bd label add "$CONVOY" "linear:{{linear_id}}"
+  bd --rig "$RIG" label add "$CONVOY" "linear:{{linear_id}}"
 fi
 ```
 
@@ -397,21 +424,21 @@ Default to `sonnet`. Only escalate when you can name the specific
 complexity signal from the design doc that forces it.
 
 ```bash
-TASK_ID=$(bd create --title "<slice title>" --description "<slice desc>" \
-                    --type task --priority 2 --json | jq -r .id)
+TASK_ID=$(bd --rig "$RIG" create --title "<slice title>" --description "<slice desc>" \
+                               --type task --priority 2 --json | jq -r .id)
 if [ -n "{{linear_id}}" ]; then
-  bd update "$TASK_ID" \
+  bd --rig "$RIG" update "$TASK_ID" \
     --set-metadata linear_id={{linear_id}} \
     --external-ref linear-{{linear_id}}
 fi
 
 # Stamp the tier decision. TIER is one of: sonnet | opus-high | opus-max-1m.
 TIER="sonnet"   # change per the rubric above for this specific slice
-bd update "$TASK_ID" --set-metadata agent_tier="$TIER"
-bd update "$TASK_ID" --set-metadata gc.routed_to="polecats.$TIER"
-bd label add "$TASK_ID" "tier:$TIER"
+bd --rig "$RIG" update "$TASK_ID" --set-metadata agent_tier="$TIER"
+bd --rig "$RIG" update "$TASK_ID" --set-metadata gc.routed_to="polecats.$TIER"
+bd --rig "$RIG" label add "$TASK_ID" "tier:$TIER"
 
-gc convoy add "$CONVOY" "$TASK_ID"
+gc convoy --rig "$RIG" add "$CONVOY" "$TASK_ID"
 ```
 
 **5. Wire dependencies with `bd dep add`.**
@@ -438,9 +465,10 @@ hands off mechanically instead of via side-channel notification.
 # Hand dispatch off to the mayor pool. This creates a mayor-owned
 # molecule bead running mol-sc-sling-convoy, which walks the convoy's
 # children and slings each to the tier-appropriate polecat variant per
-# metadata.agent_tier stamped above.
+# metadata.agent_tier stamped above. Pass rig so mol-sc-sling-convoy
+# looks up the convoy in the correct rig's bead store.
 DISPATCH_RESULT=$(gc sling hq/mayor mol-sc-sling-convoy --formula \
-  --var convoy_id="$CONVOY" 2>&1)
+  --var convoy_id="$CONVOY" --var rig="$RIG" 2>&1)
 echo "dispatch-convoy: $DISPATCH_RESULT"
 
 LINK_NOTE=""
