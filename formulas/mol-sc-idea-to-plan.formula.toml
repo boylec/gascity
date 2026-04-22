@@ -435,7 +435,7 @@ fi
 # Stamp the tier decision. TIER is one of: sonnet | opus-high | opus-max-1m.
 TIER="sonnet"   # change per the rubric above for this specific slice
 bd --rig "$RIG" update "$TASK_ID" --set-metadata agent_tier="$TIER"
-bd --rig "$RIG" update "$TASK_ID" --set-metadata gc.routed_to="polecats.$TIER"
+bd --rig "$RIG" update "$TASK_ID" --set-metadata gc.routed_to="$RIG/polecats.$TIER"
 bd --rig "$RIG" label add "$TASK_ID" "tier:$TIER"
 
 gc convoy --rig "$RIG" add "$CONVOY" "$TASK_ID"

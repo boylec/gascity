@@ -102,23 +102,23 @@ jq -c '.[]' ".convoy-logs/{{convoy_id}}/open-children.json" \
     # Prefer the Quartermaster-stamped tier (see mol-sc-idea-to-plan create-beads).
     # Target format: <rig>/polecats.<variant> — polecats pack is rig-imported per city.toml.
     case "$TIER_META" in
-      sonnet)      VARIANT="polecats.sonnet" ;;
-      opus-high)   VARIANT="polecats.opus-high" ;;
-      opus-max-1m) VARIANT="polecats.opus-max-1m" ;;
+      sonnet)      VARIANT="${RIG}/polecats.sonnet" ;;
+      opus-high)   VARIANT="${RIG}/polecats.opus-high" ;;
+      opus-max-1m) VARIANT="${RIG}/polecats.opus-max-1m" ;;
       "")          : ;;   # fall through to regex
       *) echo "unknown agent_tier=$TIER_META on $BEAD; falling back to regex" >&2 ;;
     esac
 
     if [ -z "$VARIANT" ]; then
       # Regex fallback for beads created before the tier-stamping contract.
-      VARIANT="polecats.sonnet"
+      VARIANT="${RIG}/polecats.sonnet"
       if printf '%s' "$TEXT" | grep -qE 'architecture|migration|cross.cutting|new subsystem|hard debug|security.sensitive|data model|schema change|rewrite|refactor across'; then
-        VARIANT="polecats.opus-high"
+        VARIANT="${RIG}/polecats.opus-high"
       fi
     fi
 
     # Trivial flag: only the sonnet tier can skip ralph. Opus tiers always get ralph.
-    if [ "$VARIANT" = "polecats.sonnet" ]; then
+    if [ "$VARIANT" = "${RIG}/polecats.sonnet" ]; then
       if printf '%s' "$TEXT" | grep -qE 'typo|version bump|bump dependency|rename (the )?(config|string|variable|constant)|comment.only|trivial doc|doc (fix|typo)'; then
         TRIVIAL="true"
       fi
@@ -129,7 +129,8 @@ jq -c '.[]' ".convoy-logs/{{convoy_id}}/open-children.json" \
       WORK_FORMULA="mol-polecat-work-monorepo-tdd"
     fi
 
-    gc sling "$RIG/$VARIANT" "$BEAD" \
+    # VARIANT already includes the rig prefix (e.g., "enterprise/polecats.sonnet").
+    gc sling "$VARIANT" "$BEAD" \
       --on "$WORK_FORMULA" \
       --meta "trivial=$TRIVIAL"
 

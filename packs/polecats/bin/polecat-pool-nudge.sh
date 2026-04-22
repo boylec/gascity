@@ -1,20 +1,31 @@
 #!/bin/bash
 # polecat-pool-nudge.sh — overnight duct tape for autonomous bead drain.
 #
-# Two passes:
+# Covers pooled agents (polecats + quartermasters + furiosa-named polecats).
+# Witness handles *dead* agents with orphan worktrees. This script fills
+# three gaps witness doesn't address:
 #
-# (1) Idle drain: nudge every active polecat session so it runs `gc hook`
-#     and pulls the next routed bead. Polecats don't auto-poll today;
-#     without this they go idle after each bead and sit forever.
+# (0) Pool-demand spawn: if beads are routed to a template but no session
+#     of that template exists (active/asleep/creating), spawn one. The
+#     reconciler's min_active_sessions only guarantees a floor — it doesn't
+#     auto-scale on route demand, and pools that got killed won't respawn
+#     until something triggers them.
 #
-# (2) Hung-session probe: for each in_progress bead whose updated_at is
-#     older than STALE_MIN minutes AND whose assignee session is still
-#     active, send a targeted "are you stuck?" nudge. Witness handles
-#     *dead* agents (process gone, worktree orphaned) — this pass
-#     covers *hung* ones (alive session, stale work).
+# (1) Idle drain: nudge active + asleep pool sessions so they run
+#     `gc hook` and pull the next routed bead. Pool sessions don't
+#     auto-poll today (gc-grn bug); without external nudging they go
+#     idle after each bead and sit forever.
 #
-# Both passes use --delivery wait-idle so busy polecats aren't
-# interrupted mid-work. Nudges are idempotent by design.
+# (2) Session-liveness salvage: for each in_progress bead whose
+#     updated_at is older than STALE_MIN minutes:
+#       - assignee session is `active` → hung probe (nudge "are you stuck?")
+#       - assignee session is closed/asleep/absent → unassign + reopen
+#     Witness's orphan-recovery check matches by template PATTERN, so it
+#     misses cases where a specific session ID is dead but the pool's
+#     next instance has a different ID. See gc-m7qm in the gascity fork.
+#
+# Nudge delivery is wait-idle so busy workers aren't interrupted mid-work.
+# All nudges are idempotent.
 
 set -eu
 
@@ -22,15 +33,76 @@ STALE_MIN="${STALE_MIN:-20}"
 NOW_EPOCH=$(date +%s)
 STALE_CUTOFF=$((NOW_EPOCH - STALE_MIN * 60))
 
+# Templates that are city-scoped (spawned bare, no rig prefix).
+CITY_SCOPED_RE='^(quartermaster|dog)$'
+
+# Resolve a gc.routed_to value + originating rig to a spawnable template name.
+#   "enterprise/polecats.sonnet" (already prefixed) → "enterprise/polecats.sonnet"
+#   "polecats.sonnet" in rig=enterprise            → "enterprise/polecats.sonnet"
+#   "quartermaster" (city-scoped)                  → "quartermaster"
+resolve_template() {
+  local route="$1"
+  local rig="$2"
+  case "$route" in
+    */*)                  printf '%s' "$route" ;;       # already rig-prefixed
+    "")                   return 1 ;;
+    *)
+      if printf '%s' "$route" | grep -qE "$CITY_SCOPED_RE"; then
+        printf '%s' "$route"
+      else
+        printf '%s/%s' "$rig" "$route"
+      fi
+      ;;
+  esac
+}
+
+# ---------- Pass 0: spawn pools that have routed work but no session ------
+
+spawn_for_rig() {
+  local rig_flag="$1"
+  local rig_label="$2"
+  local rows
+  rows=$(gc bd $rig_flag list --limit 0 --json 2>/dev/null \
+    | jq -r '.[] | select(.status == "open" or .status == "in_progress") | .metadata["gc.routed_to"] // empty' \
+    | sort -u)
+  [ -z "$rows" ] && return
+
+  local sessions_json
+  sessions_json=$(gc session list --state=all --json 2>/dev/null)
+
+  local spawned=0
+  for route in $rows; do
+    local template
+    template=$(resolve_template "$route" "$rig_label") || continue
+
+    # Is there any non-closed session of this template?
+    local have
+    have=$(printf '%s' "$sessions_json" \
+      | jq -r --arg t "$template" '[.[] | select(.Template == $t) | select(.State != "closed")] | length')
+    [ "$have" -gt 0 ] && continue
+
+    echo "polecat-pool-nudge: pass0 spawning $template (no live session, beads routed to it in rig=${rig_label})"
+    gc session new "$template" --no-attach >/dev/null 2>&1 || echo "polecat-pool-nudge: pass0 spawn failed for $template"
+    spawned=$((spawned + 1))
+  done
+  [ "$spawned" -gt 0 ] && echo "polecat-pool-nudge: pass0 rig=${rig_label} spawned ${spawned} template(s)"
+}
+
+spawn_for_rig "" "hq"
+spawn_for_rig "--rig enterprise" "enterprise"
+
 # ---------- Pass 1: nudge idle polecats to drain routed queue -------------
 
-# Include both active and asleep polecats. Asleep sessions need waking to
-# pull new work; nudge delivery wakes tmux-backed sessions. Skip "creating"
-# and "closed" — those aren't reachable.
+# Include both active and asleep pool sessions. Asleep sessions need
+# waking to pull new work. Skip "creating" and "closed" — not reachable.
+# Pool templates covered:
+#   polecats.*               — sc implementation polecats
+#   gastown.polecat          — rig-scoped base polecat (furiosa etc.)
+#   quartermaster            — city-scoped planning coordinators
 IDLE_SESSIONS=$(gc session list --state=all --json 2>/dev/null \
   | jq -r '.[]
     | select(.State == "active" or .State == "asleep")
-    | select((.Template // "") | test("(^|/)polecats\\.|(^|/)gastown\\.polecat$"))
+    | select((.Template // "") | test("(^|/)polecats\\.|(^|/)gastown\\.polecat$|^quartermaster$"))
     | "\(.ID)\t\(.State)"')
 
 IDLE_COUNT=0
