@@ -164,11 +164,14 @@ func Compile(_ context.Context, name string, searchPaths []string, vars map[stri
 
 func toRecipeWithGraph(f *Formula, graphWorkflow bool) (*Recipe, error) {
 	r := &Recipe{
-		Name:        f.Formula,
-		Description: f.Description,
-		Vars:        f.Vars,
-		Phase:       f.Phase,
-		Pour:        f.Pour,
+		Name:           f.Formula,
+		Description:    f.Description,
+		Vars:           f.Vars,
+		Phase:          f.Phase,
+		Pour:           f.Pour,
+		ContentHash:    f.ContentHash,
+		FormulaVersion: f.Version,
+		FormulaSource:  f.Source,
 	}
 
 	// Determine root title: use {{title}} placeholder if the variable
