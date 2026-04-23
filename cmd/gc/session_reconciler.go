@@ -1046,6 +1046,8 @@ func reconcileSessionBeadsTraced(
 		clk, rec, startupTimeout, stdout, stderr, trace,
 	)
 
+	nudgeRoutedWorkSessions(cityPath, cfg, sp, store, wakeTargets, awakeDecisions, workSet, stdout, stderr)
+
 	// Phase 2: Advance all in-flight drains.
 	sessionLookup := func(id string) *beads.Bead {
 		return beadByID[id]
