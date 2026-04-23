@@ -127,13 +127,35 @@ func slingFormula(opts SlingOpts, deps SlingDeps) (SlingResult, error) {
 	if err != nil {
 		return SlingResult{Target: a.QualifiedName()}, fmt.Errorf("instantiating formula %q: %w", opts.BeadOrFormula, err)
 	}
+	varErrs := stampFormulaVarMetadata(deps.Store, mResult.RootID, opts.Vars)
 	if mResult.GraphWorkflow || IsGraphWorkflowAttachment(deps.Store, mResult.RootID) {
 		wfResult, wfErr := doStartGraphWorkflow(mResult.RootID, "", a, method, deps)
 		wfResult.FormulaName = opts.BeadOrFormula
+		wfResult.MetadataErrors = append(wfResult.MetadataErrors, varErrs...)
 		return wfResult, wfErr
 	}
-	result := SlingResult{Target: a.QualifiedName(), FormulaName: opts.BeadOrFormula}
+	result := SlingResult{Target: a.QualifiedName(), FormulaName: opts.BeadOrFormula, MetadataErrors: varErrs}
 	return finalize(opts, deps, mResult.RootID, method, result)
+}
+
+// stampFormulaVarMetadata stamps user-provided formula vars as gc.var.* metadata
+// on the molecule root bead. This lets agents identify a molecule's inputs from
+// the root bead alone without parsing sub-step descriptions.
+func stampFormulaVarMetadata(store beads.Store, rootID string, userVars []string) []string {
+	if store == nil || rootID == "" || len(userVars) == 0 {
+		return nil
+	}
+	var errs []string
+	for _, v := range userVars {
+		key, value, ok := strings.Cut(v, "=")
+		if !ok || key == "" {
+			continue
+		}
+		if err := store.SetMetadata(rootID, "gc.var."+key, value); err != nil {
+			errs = append(errs, fmt.Sprintf("stamping gc.var.%s on %s: %v", key, rootID, err))
+		}
+	}
+	return errs
 }
 
 // slingOnFormula handles the --on formula attachment path.

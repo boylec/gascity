@@ -393,6 +393,38 @@ func TestDoSlingFormulaToAgent(t *testing.T) {
 	}
 }
 
+func TestDoSlingFormulaStampsVarMetadata(t *testing.T) {
+	runner := newFakeRunner()
+	sp := runtime.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor", MaxActiveSessions: intPtr(1)}
+
+	deps := testDeps(cfg, sp, runner.run)
+	result, err := DoSling(SlingOpts{
+		Target:        a,
+		BeadOrFormula: "code-review",
+		IsFormula:     true,
+		Vars:          []string{"linear_id=SAF-88", "problem=API Guidelines"},
+	}, deps, nil)
+	if err != nil {
+		t.Fatalf("DoSling error: %v", err)
+	}
+	if result.BeadID == "" {
+		t.Fatal("expected non-empty BeadID (wisp root)")
+	}
+
+	b, err := deps.Store.Get(result.BeadID)
+	if err != nil {
+		t.Fatalf("getting root bead: %v", err)
+	}
+	if got := b.Metadata["gc.var.linear_id"]; got != "SAF-88" {
+		t.Errorf("gc.var.linear_id = %q, want %q", got, "SAF-88")
+	}
+	if got := b.Metadata["gc.var.problem"]; got != "API Guidelines" {
+		t.Errorf("gc.var.problem = %q, want %q", got, "API Guidelines")
+	}
+}
+
 func TestDoSlingCrossRigBlocks(t *testing.T) {
 	runner := newFakeRunner()
 	sp := runtime.NewFake()
