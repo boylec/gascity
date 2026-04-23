@@ -972,6 +972,42 @@ func TestResolveAgentIdentityUnambiguous(t *testing.T) {
 	}
 }
 
+func TestResolveAgentIdentityV2ShortForm(t *testing.T) {
+	cfg := &config.City{
+		Agents: []config.Agent{
+			{Name: "polecat", Dir: "gascity", BindingName: "gastown",
+				MinActiveSessions: intPtr(1), MaxActiveSessions: intPtr(3)},
+			{Name: "refinery", Dir: "gascity", BindingName: "gastown"},
+		},
+	}
+	tests := []struct {
+		name      string
+		input     string
+		wantFound bool
+		wantName  string
+	}{
+		{"canonical V2 qualified", "gascity/gastown.polecat", true, "polecat"},
+		{"short form V2 qualified", "gascity/polecat", true, "polecat"},
+		{"canonical V2 refinery", "gascity/gastown.refinery", true, "refinery"},
+		{"short form V2 refinery", "gascity/refinery", true, "refinery"},
+		{"wrong dir", "enterprise/polecat", false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, found := resolveAgentIdentity(cfg, tt.input, "")
+			if found != tt.wantFound {
+				t.Fatalf("resolveAgentIdentity(%q) found = %v, want %v", tt.input, found, tt.wantFound)
+			}
+			if !found {
+				return
+			}
+			if got.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", got.Name, tt.wantName)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // findAgentByName unit tests (pool suffix stripping for gc prime)
 // ---------------------------------------------------------------------------

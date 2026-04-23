@@ -1452,6 +1452,102 @@ esac
 	}
 }
 
+func TestEffectiveWorkQueryV2BindingShortFormAlias(t *testing.T) {
+	a := Agent{Name: "polecat", Dir: "gascity", BindingName: "gastown"}
+	got := a.EffectiveWorkQuery()
+	if !strings.Contains(got, "gc.routed_to=gascity/gastown.polecat") {
+		t.Errorf("EffectiveWorkQuery() missing canonical routed_to: %q", got)
+	}
+	if !strings.Contains(got, "gc.routed_to=gascity/polecat") {
+		t.Errorf("EffectiveWorkQuery() missing short-form routed_to alias: %q", got)
+	}
+}
+
+func TestEffectiveWorkQueryV2BindingPoolInstanceShortForm(t *testing.T) {
+	a := Agent{
+		Name:              "gastown.polecat-1",
+		Dir:               "gascity",
+		BindingName:       "gastown",
+		PoolName:          "gascity/gastown.polecat",
+		MinActiveSessions: ptrInt(1), MaxActiveSessions: ptrInt(3),
+	}
+	got := a.EffectiveWorkQuery()
+	if !strings.Contains(got, "gc.routed_to=gascity/gastown.polecat") {
+		t.Errorf("EffectiveWorkQuery() missing canonical routed_to: %q", got)
+	}
+	if !strings.Contains(got, "gc.routed_to=gascity/polecat") {
+		t.Errorf("EffectiveWorkQuery() missing short-form routed_to alias: %q", got)
+	}
+}
+
+func TestEffectiveWorkQueryV2ShortFormFindsWork(t *testing.T) {
+	a := Agent{Name: "polecat", Dir: "gascity", BindingName: "gastown"}
+	out := runEffectiveWorkQuery(t, a, nil, `#!/bin/sh
+set -eu
+case "$*" in
+  "ready --metadata-field gc.routed_to=gascity/gastown.polecat --unassigned --json --limit=1")
+    printf '[]'
+    ;;
+  "ready --metadata-field gc.routed_to=gascity/polecat --unassigned --json --limit=1")
+    printf '[{"id":"short-form-hit"}]'
+    ;;
+  *)
+    printf '[]'
+    ;;
+esac
+`)
+	if got, want := strings.TrimSpace(out), `[{"id":"short-form-hit"}]`; got != want {
+		t.Fatalf("short-form routed work query output = %q, want %q", got, want)
+	}
+}
+
+func TestEffectiveWorkQueryNoBindingNoShortForm(t *testing.T) {
+	a := Agent{Name: "polecat", Dir: "gascity"}
+	got := a.EffectiveWorkQuery()
+	count := strings.Count(got, "gc.routed_to=gascity/polecat")
+	if count < 2 {
+		t.Errorf("EffectiveWorkQuery() should have routed_to in tier 3 + 4, got %d occurrences", count)
+	}
+	if strings.Contains(got, "gc.routed_to=gascity/gastown") {
+		t.Errorf("EffectiveWorkQuery() should not have binding-qualified form without BindingName")
+	}
+}
+
+func TestUnboundQualifiedName(t *testing.T) {
+	tests := []struct {
+		agent Agent
+		want  string
+	}{
+		{Agent{Name: "polecat", Dir: "gascity", BindingName: "gastown"}, "gascity/polecat"},
+		{Agent{Name: "polecat", Dir: "gascity"}, "gascity/polecat"},
+		{Agent{Name: "mayor"}, "mayor"},
+		{Agent{Name: "mayor", BindingName: "gastown"}, "mayor"},
+	}
+	for _, tt := range tests {
+		got := tt.agent.UnboundQualifiedName()
+		if got != tt.want {
+			t.Errorf("Agent{Name:%q,Dir:%q,BindingName:%q}.UnboundQualifiedName() = %q, want %q",
+				tt.agent.Name, tt.agent.Dir, tt.agent.BindingName, got, tt.want)
+		}
+	}
+}
+
+func TestAgentMatchesIdentityV2ShortForm(t *testing.T) {
+	a := Agent{Name: "polecat", Dir: "gascity", BindingName: "gastown"}
+	if !AgentMatchesIdentity(&a, "gascity/gastown.polecat") {
+		t.Error("should match canonical V2 name")
+	}
+	if !AgentMatchesIdentity(&a, "gascity/polecat") {
+		t.Error("should match unbound short form")
+	}
+	if AgentMatchesIdentity(&a, "enterprise/polecat") {
+		t.Error("should not match wrong dir")
+	}
+	if AgentMatchesIdentity(&a, "polecat") {
+		t.Error("should not match bare name without dir")
+	}
+}
+
 func TestEffectiveSlingQueryPoolNameOverride(t *testing.T) {
 	a := Agent{
 		Name:              "dog-1",
