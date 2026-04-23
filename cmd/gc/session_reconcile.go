@@ -452,7 +452,7 @@ func computeWorkSet(cfg *config.City, runner ScaleCheckRunner, cityName, cityDir
 func nudgeRoutedWorkSessions(
 	cityPath string,
 	cfg *config.City,
-	sp runtime.Provider,
+	_ runtime.Provider,
 	store beads.Store,
 	targets []wakeTarget,
 	awakeDecisions map[string]AwakeDecision,

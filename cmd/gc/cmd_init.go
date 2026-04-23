@@ -441,20 +441,12 @@ func ensureInitConventionDirs(fs fsys.FS, cityPath string) error {
 	return nil
 }
 
-func writeInitPackToml(fs fsys.FS, cityPath string, packCfg initPackConfig) error {
-	content, err := marshalInitPackConfig(packCfg)
-	if err != nil {
-		return err
-	}
-	return fs.WriteFile(filepath.Join(cityPath, "pack.toml"), content, 0o644)
-}
-
 // writeInitFile writes data to path. When preserve is true and path already
 // exists, the existing file is kept untouched and wrote=false is returned.
 // preserve is set by --preserve-existing, which callers (e.g. bootstrap
 // scripts operating on a pre-authored workspace) use to avoid clobbering
 // committed user files like pack.toml, city.toml, and agent prompts.
-func writeInitFile(fs fsys.FS, path string, data []byte, perm os.FileMode, preserve bool) (wrote bool, err error) {
+func writeInitFile(fs fsys.FS, path string, data []byte, preserve bool) (wrote bool, err error) {
 	if preserve {
 		if _, err := fs.Stat(path); err == nil {
 			return false, nil
@@ -462,7 +454,7 @@ func writeInitFile(fs fsys.FS, path string, data []byte, perm os.FileMode, prese
 			return false, err
 		}
 	}
-	return true, fs.WriteFile(path, data, perm)
+	return true, fs.WriteFile(path, data, 0o644)
 }
 
 // writeInitPackTomlOpts marshals and writes pack.toml, honoring the
@@ -472,7 +464,7 @@ func writeInitPackTomlOpts(fs fsys.FS, cityPath string, packCfg initPackConfig, 
 	if err != nil {
 		return false, err
 	}
-	return writeInitFile(fs, filepath.Join(cityPath, "pack.toml"), content, 0o644, preserve)
+	return writeInitFile(fs, filepath.Join(cityPath, "pack.toml"), content, preserve)
 }
 
 func marshalInitPackConfig(cfg initPackConfig) ([]byte, error) {
@@ -792,7 +784,7 @@ func cmdInitFromTOMLFileWithOptions(fs fsys.FS, tomlSrc, cityPath, nameOverride 
 	// committed city.toml is already in place. Persist the workspace identity
 	// regardless so .gc/site.toml agrees with the preserved or newly-written
 	// config.
-	wroteCity, err := writeInitFile(fs, filepath.Join(cityPath, "city.toml"), content, 0o644, preserveExisting)
+	wroteCity, err := writeInitFile(fs, filepath.Join(cityPath, "city.toml"), content, preserveExisting)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -925,7 +917,7 @@ func doInit(fs fsys.FS, cityPath string, wiz wizardConfig, nameOverride string, 
 		fmt.Fprintln(stdout, "Preserved existing pack.toml.") //nolint:errcheck // best-effort stdout
 	}
 	logInitProgress(stdout, 5, "Writing city configuration")
-	wroteCity, err := writeInitFile(fs, tomlPath, content, 0o644, preserveExisting)
+	wroteCity, err := writeInitFile(fs, tomlPath, content, preserveExisting)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -1034,7 +1026,7 @@ func writeInitAgentPrompts(fs fsys.FS, cityPath string, cfg *config.City, stderr
 			fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}
-		if _, err := writeInitFile(fs, dst, data, 0o644, preserveExisting); err != nil {
+		if _, err := writeInitFile(fs, dst, data, preserveExisting); err != nil {
 			fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}

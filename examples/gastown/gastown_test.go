@@ -636,7 +636,7 @@ func TestIdeaToPlanFormulaUsesSupportedPrimitives(t *testing.T) {
 	body := string(data)
 	for _, want := range []string{
 		`formula = "mol-idea-to-plan"`,
-		`gc sling "$REVIEW_TARGET" "$LEG_BEAD" --on {{review_formula}}`,
+		`"$GC_CITY_DIR/assets/scripts/verified-sling.sh" "$REVIEW_TARGET" "$LEG_BEAD" --on {{review_formula}}`,
 		`gc bd create`,
 		`gc mail send`,
 		`gc bd dep add`,
