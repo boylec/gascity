@@ -183,6 +183,7 @@ func buildDesiredStateWithSessionBeads(
 
 	bp := newAgentBuildParams(cityName, cityPath, cfg, sp, beaconTime, store, stderr)
 	bp.sessionBeads = sessionBeads
+	bp.rigStores = rigStores
 
 	// Pre-compute suspended rig paths.
 	suspendedRigPaths := buildSuspendedRigPaths(cfg)
@@ -1168,12 +1169,12 @@ func selectOrCreatePoolSessionBead(
 			return bead, nil
 		}
 	}
-	return createPoolSessionBead(bp.beadStore, template, bp.sessionBeads)
+	return createPoolSessionBead(bp.storeForAgent(cfgAgent), template, bp.sessionBeads)
 }
 
 func selectOrCreateDependencyPoolSessionBead(
 	bp *agentBuildParams,
-	_ *config.Agent,
+	cfgAgent *config.Agent,
 	template string,
 ) (beads.Bead, error) {
 	for _, bead := range bp.sessionBeads.Open() {
@@ -1196,7 +1197,7 @@ func selectOrCreateDependencyPoolSessionBead(
 			return bead, nil
 		}
 	}
-	return createPoolSessionBead(bp.beadStore, template, bp.sessionBeads)
+	return createPoolSessionBead(bp.storeForAgent(cfgAgent), template, bp.sessionBeads)
 }
 
 func agentInSuspendedRig(
