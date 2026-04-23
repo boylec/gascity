@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -2572,6 +2573,47 @@ func TestCmdInitFromTOMLFilePreserveExistingBlockedByScaffold(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "already initialized") {
 		t.Errorf("stderr = %q, want 'already initialized'", stderr.String())
+	}
+}
+
+func TestWriteInitFile_PreserveExistingStatError(t *testing.T) {
+	// When preserve=true, a Stat error that isn't os.IsNotExist must surface
+	// to the caller instead of being silently treated as "does not exist".
+	f := fsys.NewFake()
+	target := "/city/pack.toml"
+	f.Errors[target] = errors.New("permission denied")
+
+	wrote, err := writeInitFile(f, target, []byte("new"), true)
+	if err == nil {
+		t.Fatal("expected error propagation, got nil")
+	}
+	if wrote {
+		t.Errorf("wrote = true on stat error; want false")
+	}
+	// Must not have attempted to write over the file.
+	for _, c := range f.Calls {
+		if c.Method == "WriteFile" && c.Path == target {
+			t.Errorf("WriteFile called despite stat error; calls=%v", f.Calls)
+		}
+	}
+}
+
+func TestWriteInitFile_PreserveFalseOverwrites(t *testing.T) {
+	// When preserve=false, the helper writes unconditionally — even over
+	// an existing file — mirroring the pre-flag default behavior.
+	f := fsys.NewFake()
+	target := "/city/pack.toml"
+	f.Files[target] = []byte("existing")
+
+	wrote, err := writeInitFile(f, target, []byte("replacement"), false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !wrote {
+		t.Errorf("wrote = false; want true when preserve=false")
+	}
+	if got := string(f.Files[target]); got != "replacement" {
+		t.Errorf("file contents = %q, want %q", got, "replacement")
 	}
 }
 
