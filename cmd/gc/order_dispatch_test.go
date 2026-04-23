@@ -1195,6 +1195,84 @@ func slicesContain(values []string, want string) bool {
 	return false
 }
 
+func TestOrderDispatchWispUsesBindingQualifiedPool(t *testing.T) {
+	// When an order has pool="dog" and the config has an agent "dog" with
+	// BindingName="gastown" (QualifiedName="gastown.dog"), the wisp root bead
+	// must carry gc.routed_to=gastown.dog so scale_check and work_query match.
+	store := beads.NewMemStore()
+
+	aa := []orders.Order{{
+		Name:         "dog-order",
+		Trigger:      "cooldown",
+		Interval:     "1m",
+		Formula:      "test-formula",
+		Pool:         "dog",
+		FormulaLayer: sharedTestFormulaDir,
+	}}
+	ad := buildOrderDispatcherFromList(aa, store, nil)
+	if ad == nil {
+		t.Fatal("expected non-nil dispatcher")
+	}
+
+	// Inject an agent "dog" with binding "gastown" → QualifiedName "gastown.dog".
+	mad := ad.(*memoryOrderDispatcher)
+	mad.cfg = &config.City{
+		Agents: []config.Agent{{
+			Name:        "dog",
+			BindingName: "gastown",
+		}},
+	}
+
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(50 * time.Millisecond)
+
+	work := workBeadByOrderLabel(t, store, "order-run:dog-order")
+	want := "gastown.dog"
+	if work.Metadata["gc.routed_to"] != want {
+		t.Errorf("gc.routed_to = %q, want %q", work.Metadata["gc.routed_to"], want)
+	}
+}
+
+func TestOrderDispatchWispUsesBindingQualifiedRigPool(t *testing.T) {
+	// When an order has pool="polecat" rig="enterprise" and the config has an agent
+	// with Dir="enterprise" Name="polecat" BindingName="gastown", the wisp root
+	// must carry gc.routed_to=enterprise/gastown.polecat.
+	store := beads.NewMemStore()
+
+	aa := []orders.Order{{
+		Name:         "rig-pool-order",
+		Trigger:      "cooldown",
+		Interval:     "1m",
+		Formula:      "test-formula",
+		Pool:         "polecat",
+		Rig:          "enterprise",
+		FormulaLayer: sharedTestFormulaDir,
+	}}
+	ad := buildOrderDispatcherFromList(aa, store, nil)
+	if ad == nil {
+		t.Fatal("expected non-nil dispatcher")
+	}
+
+	mad := ad.(*memoryOrderDispatcher)
+	mad.cfg = &config.City{
+		Rigs: []config.Rig{{Name: "enterprise", Path: "/tmp/enterprise"}},
+		Agents: []config.Agent{{
+			Name:        "polecat",
+			Dir:         "enterprise",
+			BindingName: "gastown",
+		}},
+	}
+
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(50 * time.Millisecond)
+
+	work := workBeadByOrderLabel(t, store, "order-run:rig-pool-order:rig:enterprise")
+	want := "enterprise/gastown.polecat"
+	if work.Metadata["gc.routed_to"] != want {
+		t.Errorf("gc.routed_to = %q, want %q", work.Metadata["gc.routed_to"], want)
+	}
+}
+
 // --- rig-scoped dispatch tests ---
 
 func TestBuildOrderDispatcherWithRigs(t *testing.T) {

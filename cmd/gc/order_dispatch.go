@@ -323,7 +323,7 @@ func (m *memoryOrderDispatcher) dispatchWisp(ctx context.Context, store beads.St
 	// Decorate graph workflow recipes with routing metadata so child step
 	// beads get gc.routed_to set before instantiation.
 	if a.Pool != "" {
-		pool := qualifyPool(a.Pool, a.Rig)
+		pool := resolvePoolQualifiedName(a.Pool, a.Rig, m.cfg)
 		if err := applyGraphRouting(recipe, nil, pool, nil, "", "", "", "", store, m.cityName, cityPath, m.cfg); err != nil {
 			logDispatchError(m.stderr, "gc: order %s: routing decoration failed: %v", scoped, err)
 			// Non-fatal — molecule still works, just without step-level routing.
@@ -353,7 +353,7 @@ func (m *memoryOrderDispatcher) dispatchWisp(ctx context.Context, store beads.St
 		)
 	}
 	if a.Pool != "" {
-		pool := qualifyPool(a.Pool, a.Rig)
+		pool := resolvePoolQualifiedName(a.Pool, a.Rig, m.cfg)
 		update.Metadata = map[string]string{"gc.routed_to": pool}
 	}
 	if err := store.Update(rootID, update); err != nil {
@@ -520,6 +520,25 @@ func qualifyPool(pool, rig string) string {
 		return pool
 	}
 	return rig + "/" + pool
+}
+
+// resolvePoolQualifiedName returns the binding-qualified name for a pool target.
+// It first rig-qualifies the pool name via qualifyPool, then resolves the result
+// against the config to find the agent's canonical QualifiedName (which includes
+// the binding prefix, e.g. "gastown.dog" or "enterprise/gastown.polecat"). When
+// no matching agent is found, the rig-qualified form is returned unchanged.
+func resolvePoolQualifiedName(pool, rig string, cfg *config.City) string {
+	qualified := qualifyPool(pool, rig)
+	if cfg == nil {
+		return qualified
+	}
+	dir, name := config.ParseQualifiedName(qualified)
+	for _, a := range cfg.Agents {
+		if a.Dir == dir && a.Name == name {
+			return a.QualifiedName()
+		}
+	}
+	return qualified
 }
 
 // convertOverrides converts config.OrderOverride to orders.Override.
