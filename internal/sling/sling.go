@@ -709,6 +709,7 @@ func BuildSlingFormulaVars(formulaName, beadID string, userVars []string, a conf
 	if beadID != "" {
 		addVar("issue", beadID)
 	}
+	addVar("rig_name", a.Dir)
 
 	autoBranch := SlingFormulaTargetBranch(beadID, deps, a)
 	if SlingFormulaUsesBaseBranch(formulaName) {

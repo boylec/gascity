@@ -2632,3 +2632,39 @@ func TestDoSlingForceSkipsCrossRig(t *testing.T) {
 		t.Fatalf("DoSling with --force should not error on cross-rig: %v", err)
 	}
 }
+
+func TestBuildSlingFormulaVarsRigName(t *testing.T) {
+	a := config.Agent{Name: "polecat", Dir: "enterprise", BindingName: "gastown"}
+	deps := SlingDeps{
+		Store: beads.NewMemStore(),
+	}
+	vars := BuildSlingFormulaVars("mol-polecat-work", "gc-1234", nil, a, deps)
+	if got, want := vars["rig_name"], "enterprise"; got != want {
+		t.Errorf("rig_name = %q, want %q", got, want)
+	}
+	if got, want := vars["issue"], "gc-1234"; got != want {
+		t.Errorf("issue = %q, want %q", got, want)
+	}
+}
+
+func TestBuildSlingFormulaVarsRigNameNotOverridden(t *testing.T) {
+	a := config.Agent{Name: "polecat", Dir: "enterprise", BindingName: "gastown"}
+	deps := SlingDeps{
+		Store: beads.NewMemStore(),
+	}
+	vars := BuildSlingFormulaVars("mol-polecat-work", "gc-1234", []string{"rig_name=custom"}, a, deps)
+	if got, want := vars["rig_name"], "custom"; got != want {
+		t.Errorf("explicit rig_name should win: got %q, want %q", got, want)
+	}
+}
+
+func TestBuildSlingFormulaVarsNoDirNoRigName(t *testing.T) {
+	a := config.Agent{Name: "polecat"}
+	deps := SlingDeps{
+		Store: beads.NewMemStore(),
+	}
+	vars := BuildSlingFormulaVars("mol-polecat-work", "gc-1234", nil, a, deps)
+	if _, ok := vars["rig_name"]; ok {
+		t.Error("rig_name should not be set when agent has no Dir")
+	}
+}

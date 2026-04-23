@@ -63,6 +63,30 @@ func (a *Agent) QualifiedName() string {
 	return a.Dir + "/" + name
 }
 
+// UnboundQualifiedName returns the agent identity without binding prefix.
+// For V2 agents this strips the binding: "gascity/gastown.polecat" →
+// "gascity/polecat". For V1 agents this equals QualifiedName().
+func (a *Agent) UnboundQualifiedName() string {
+	if a.Dir == "" {
+		return a.Name
+	}
+	return a.Dir + "/" + a.Name
+}
+
+// unbindQualifiedName strips the binding prefix from a qualified agent name
+// string. "gascity/gastown.polecat" → "gascity/polecat". Names without a
+// binding dot are returned as-is.
+func unbindQualifiedName(qualified string) string {
+	dir, name := ParseQualifiedName(qualified)
+	if idx := strings.Index(name, "."); idx >= 0 {
+		name = name[idx+1:]
+	}
+	if dir == "" {
+		return name
+	}
+	return dir + "/" + name
+}
+
 // ParseQualifiedName splits an agent identity into (dir, name).
 // "hello-world/polecat" → ("hello-world", "polecat").
 // "hello-world/gastown.polecat" → ("hello-world", "gastown.polecat").
@@ -92,24 +116,19 @@ func (a *Agent) QualifiedInstanceName(instanceName string) string {
 
 // AgentMatchesIdentity returns true if the agent's qualified name matches
 // the given identity string. Handles both V1 format ("dir/name") and V2
-// format ("dir/binding.name", "binding.name"). This is the canonical way
-// to match user-supplied identity strings against agents; prefer it over
-// manual Dir+Name comparisons. The V1 fallback only applies to agents
-// without a BindingName — imported V2 agents must be addressed by their
-// qualified name.
+// format ("dir/binding.name", "binding.name"). V2 agents also match their
+// dir-qualified short form ("dir/name") for routing compatibility, but bare
+// names without a dir prefix require the binding-qualified form to avoid
+// ambiguity across packs.
 func AgentMatchesIdentity(a *Agent, identity string) bool {
-	// Try V2 qualified name first (includes binding).
 	if a.QualifiedName() == identity {
 		return true
 	}
-	// Fallback: V1-style dir+name match. Only allowed when the agent
-	// has no binding name — imported V2 agents must be addressed by
-	// their qualified name (binding.name), not bare name.
-	if a.BindingName == "" {
-		dir, name := ParseQualifiedName(identity)
-		return a.Dir == dir && a.Name == name
+	dir, name := ParseQualifiedName(identity)
+	if a.BindingName != "" && dir == "" {
+		return false
 	}
-	return false
+	return a.Dir == dir && a.Name == name
 }
 
 // City is the top-level configuration for a Gas City instance.
@@ -1787,10 +1806,23 @@ func (a *Agent) EffectiveWorkQuery() string {
 	if a.PoolName != "" {
 		target = a.PoolName
 	}
+	// V2 agents also accept the unbound short form (e.g., "gascity/polecat"
+	// instead of "gascity/gastown.polecat") so beads routed with either
+	// form are discovered.
+	shortTarget := ""
+	if a.BindingName != "" {
+		if a.PoolName != "" {
+			shortTarget = unbindQualifiedName(a.PoolName)
+		} else {
+			shortTarget = a.UnboundQualifiedName()
+		}
+		if shortTarget == target {
+			shortTarget = ""
+		}
+	}
 	legacyTarget := legacyWorkflowControlQualifiedName(target)
 	if legacyTarget == "" {
-		return `sh -c '` +
-			// Tier 1: in_progress assigned to any of my identifiers (crash recovery)
+		tiers12 := // Tier 1: in_progress assigned to any of my identifiers (crash recovery)
 			`for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"; do ` +
 			`[ -z "$id" ] && continue; ` +
 			`r=$(bd list --status in_progress --assignee="$id" --json --limit=1 2>/dev/null); ` +
@@ -1807,7 +1839,23 @@ func (a *Agent) EffectiveWorkQuery() string {
 			`case "$GC_SESSION_ORIGIN" in ` +
 			`ephemeral|"") ;; ` +
 			`*) exit 0 ;; ` +
-			`esac; ` +
+			`esac; `
+		if shortTarget != "" {
+			return `sh -c '` + tiers12 +
+				`r=$(bd ready --metadata-field gc.routed_to=` + target +
+				` --unassigned --json --limit=1 2>/dev/null); ` +
+				`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
+				`r=$(bd ready --metadata-field gc.routed_to=` + shortTarget +
+				` --unassigned --json --limit=1 2>/dev/null); ` +
+				`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
+				// Tier 4: open routed molecule roots.
+				`r=$(bd list --metadata-field gc.routed_to=` + target +
+				` --status=open --type=molecule --no-assignee --json --limit=1 2>/dev/null); ` +
+				`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
+				`bd list --metadata-field gc.routed_to=` + shortTarget +
+				` --status=open --type=molecule --no-assignee --json --limit=1 2>/dev/null'`
+		}
+		return `sh -c '` + tiers12 +
 			`r=$(bd ready --metadata-field gc.routed_to=` + target +
 			` --unassigned --json --limit=1 2>/dev/null); ` +
 			`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
