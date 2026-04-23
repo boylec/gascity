@@ -237,6 +237,7 @@ func buildDesiredStateWithSessionBeads(
 
 	bp := newAgentBuildParams(cityName, cityPath, cfg, sp, beaconTime, store, stderr)
 	bp.sessionBeads = sessionBeads
+	bp.rigStores = rigStores
 
 	// Pre-compute suspended rig paths.
 	suspendedRigPaths := buildSuspendedRigPaths(cfg)
@@ -2551,13 +2552,14 @@ func createPoolSessionBeadWithGuardedAlias(
 	if err := validateAgentSessionTransportForBuild(bp, cfgAgent, qualifiedInstance); err != nil {
 		return beads.Bead{}, err
 	}
+	store := bp.storeForAgent(cfgAgent)
 	identity := poolSessionCreateIdentity{
 		AgentName: qualifiedInstance,
 		Slot:      slot,
 	}
 	alias := strings.TrimSpace(qualifiedInstance)
-	if alias == "" || bp.beadStore == nil {
-		return createPoolSessionBead(bp.beadStore, template, bp.sessionBeads, poolSessionCreateStartedAt(bp), identity)
+	if alias == "" || store == nil {
+		return createPoolSessionBead(store, template, bp.sessionBeads, poolSessionCreateStartedAt(bp), identity)
 	}
 
 	var bead beads.Bead
@@ -2568,7 +2570,7 @@ func createPoolSessionBeadWithGuardedAlias(
 			createIdentity.Alias = alias
 		}
 		var err error
-		bead, err = createPoolSessionBead(bp.beadStore, template, bp.sessionBeads, poolSessionCreateStartedAt(bp), createIdentity)
+		bead, err = createPoolSessionBead(store, template, bp.sessionBeads, poolSessionCreateStartedAt(bp), createIdentity)
 		createdWithLock = true
 		return err
 	})
@@ -2578,7 +2580,7 @@ func createPoolSessionBeadWithGuardedAlias(
 	if lockErr != nil && bp.stderr != nil {
 		fmt.Fprintf(bp.stderr, "createPoolSessionBeadWithGuardedAlias: locking alias %q for %s: %v; creating without alias\n", alias, template, lockErr) //nolint:errcheck
 	}
-	return createPoolSessionBead(bp.beadStore, template, bp.sessionBeads, poolSessionCreateStartedAt(bp), identity)
+	return createPoolSessionBead(store, template, bp.sessionBeads, poolSessionCreateStartedAt(bp), identity)
 }
 
 func isFailedCreateSessionBead(bead beads.Bead) bool {
