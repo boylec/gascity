@@ -102,7 +102,7 @@ checks assigned work first (session bead ID, runtime session name, then
 alias) and only falls through to unassigned pool work routed to
 `{{ .RigName }}/polecat`.
 
-**Hook/work query -> Read formula steps -> Follow in order -> done sequence.**
+**Hook/work query -> Read formula steps -> Follow in order -> formula's final step.**
 
 ## Context Exhaustion
 
@@ -177,7 +177,7 @@ gc mail send mayor/ -s "BLOCKED: Need coordination" -m "..."          # Cross-ri
 
 - **Escalation**: Mail to witness as HELP — this is the ONE allowed mail use
 - **Everything else**: Use `gc nudge` — ephemeral, zero Dolt overhead
-- **Completion**: The done sequence handles notification — do NOT mail "I'm done"
+- **Completion**: Your formula's final step handles notification — do NOT mail "I'm done"
 - **Status updates**: If asked for status, respond via nudge, not mail
 
 ### Nudge Resilience
@@ -189,25 +189,18 @@ Nudges from other agents may arrive via your hook. When working:
 
 ---
 
-## FINAL REMINDER: RUN THE DONE SEQUENCE
+## FINAL REMINDER: FOLLOW YOUR FORMULA'S FINAL STEP
 
-**Before your session ends, you MUST run the done sequence.**
+**Before your session ends, you MUST complete the final step of your formula.**
 
-```bash
-git push origin HEAD
-gc bd update <work-bead> \
-  --set-metadata branch=$(git branch --show-current) \
-  --set-metadata target={{ .DefaultBranch }} \
-  --notes "Implemented: <brief summary>"
-gc bd update <work-bead> --status=open --assignee={{ .RigName }}/refinery --set-metadata gc.routed_to={{ .RigName }}/refinery
-gc runtime drain-ack
-exit
-```
+Each formula defines its own completion sequence — follow it exactly. The
+formula's final step handles bead updates, notifications, handoff, and
+`gc runtime drain-ack`. Do NOT invent your own done-sequence or skip the
+formula's instructions.
 
-Your work is not complete until you run these commands. `gc runtime drain-ack`
-signals the reconciler to kill this session — it will only restart you if the
-pool check command finds more work. Sitting idle after finishing implementation
-is the "Idle Polecat heresy."
+`gc runtime drain-ack` signals the reconciler to kill this session — it
+will only restart you if the pool check command finds more work. Sitting
+idle after finishing work is the "Idle Polecat heresy."
 
 ---
 
@@ -217,7 +210,7 @@ is the "Idle Polecat heresy."
 
 | Want to... | Correct command |
 |------------|----------------|
-| Signal work complete | Done sequence (push, set metadata, reassign, `gc runtime drain-ack`, exit) |
+| Signal work complete | Follow your formula's final step, then `gc runtime drain-ack && exit` |
 | Read formula steps | `gc bd show <wisp-id>` (shows formula ref) |
 | Escalate blocker | `gc mail send {{ .RigName }}/witness -s "ESCALATION: desc [HIGH]" -m "..."` |
 | Context exhaustion | `gc runtime request-restart` |

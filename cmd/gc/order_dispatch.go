@@ -323,7 +323,7 @@ func (m *memoryOrderDispatcher) dispatchWisp(ctx context.Context, store beads.St
 	// Decorate graph workflow recipes with routing metadata so child step
 	// beads get gc.routed_to set before instantiation.
 	if a.Pool != "" {
-		pool := qualifyPool(a.Pool, a.Rig)
+		pool := resolvePoolTemplate(qualifyPool(a.Pool, a.Rig), m.cfg)
 		if err := applyGraphRouting(recipe, nil, pool, nil, "", "", "", "", store, m.cityName, cityPath, m.cfg); err != nil {
 			logDispatchError(m.stderr, "gc: order %s: routing decoration failed: %v", scoped, err)
 			// Non-fatal — molecule still works, just without step-level routing.
@@ -353,7 +353,7 @@ func (m *memoryOrderDispatcher) dispatchWisp(ctx context.Context, store beads.St
 		)
 	}
 	if a.Pool != "" {
-		pool := qualifyPool(a.Pool, a.Rig)
+		pool := resolvePoolTemplate(qualifyPool(a.Pool, a.Rig), m.cfg)
 		update.Metadata = map[string]string{"gc.routed_to": pool}
 	}
 	if err := store.Update(rootID, update); err != nil {
@@ -520,6 +520,27 @@ func qualifyPool(pool, rig string) string {
 		return pool
 	}
 	return rig + "/" + pool
+}
+
+// resolvePoolTemplate resolves a qualified pool name to the matching agent's
+// QualifiedName. Pack-imported agents have a binding prefix (e.g., "gastown.dog")
+// that order pool values ("dog") don't include. This function bridges the gap
+// so gc.routed_to matches what EffectiveScaleCheck queries.
+func resolvePoolTemplate(qualified string, cfg *config.City) string {
+	if cfg == nil {
+		return qualified
+	}
+	dir, name := config.ParseQualifiedName(qualified)
+	for i := range cfg.Agents {
+		a := &cfg.Agents[i]
+		if a.QualifiedName() == qualified {
+			return qualified
+		}
+		if a.Dir == dir && a.Name == name {
+			return a.QualifiedName()
+		}
+	}
+	return qualified
 }
 
 // convertOverrides converts config.OrderOverride to orders.Override.

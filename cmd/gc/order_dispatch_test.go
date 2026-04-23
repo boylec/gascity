@@ -1186,6 +1186,29 @@ func buildOrderDispatcherFromListExec(aa []orders.Order, store beads.Store, ep e
 	}
 }
 
+func buildOrderDispatcherFromListWithCfg(aa []orders.Order, store beads.Store, ep events.Provider, cfg *config.City) orderDispatcher {
+	var auto []orders.Order
+	for _, a := range aa {
+		if a.Trigger != "manual" {
+			auto = append(auto, a)
+		}
+	}
+	if len(auto) == 0 {
+		return nil
+	}
+	return &memoryOrderDispatcher{
+		aa: auto,
+		storeFn: func(_ execStoreTarget) (beads.Store, error) {
+			return store, nil
+		},
+		ep:      ep,
+		execRun: shellExecRunner,
+		rec:     events.Discard,
+		stderr:  &bytes.Buffer{},
+		cfg:     cfg,
+	}
+}
+
 func slicesContain(values []string, want string) bool {
 	for _, v := range values {
 		if v == want {
@@ -1359,6 +1382,67 @@ func TestQualifyPool(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("qualifyPool(%q, %q) = %q, want %q", tt.pool, tt.rig, got, tt.want)
 		}
+	}
+}
+
+func TestResolvePoolTemplate(t *testing.T) {
+	cfg := &config.City{
+		Agents: []config.Agent{
+			{Name: "dog", BindingName: "gastown"},
+			{Name: "polecat", Dir: "demo-repo", BindingName: "gastown"},
+			{Name: "worker"},
+		},
+	}
+	tests := []struct {
+		qualified string
+		want      string
+	}{
+		{"dog", "gastown.dog"},
+		{"demo-repo/polecat", "demo-repo/gastown.polecat"},
+		{"worker", "worker"},
+		{"gastown.dog", "gastown.dog"},
+		{"unknown", "unknown"},
+	}
+	for _, tt := range tests {
+		got := resolvePoolTemplate(tt.qualified, cfg)
+		if got != tt.want {
+			t.Errorf("resolvePoolTemplate(%q) = %q, want %q", tt.qualified, got, tt.want)
+		}
+	}
+}
+
+func TestResolvePoolTemplateNilConfig(t *testing.T) {
+	got := resolvePoolTemplate("dog", nil)
+	if got != "dog" {
+		t.Errorf("resolvePoolTemplate with nil cfg = %q, want %q", got, "dog")
+	}
+}
+
+func TestOrderDispatchResolvesPoolBinding(t *testing.T) {
+	store := beads.NewMemStore()
+	cfg := &config.City{
+		Agents: []config.Agent{
+			{Name: "dog", BindingName: "maintenance"},
+		},
+	}
+	aa := []orders.Order{{
+		Name:         "dog-order",
+		Trigger:      "cooldown",
+		Interval:     "1m",
+		Formula:      "test-formula",
+		Pool:         "dog",
+		FormulaLayer: sharedTestFormulaDir,
+	}}
+	ad := buildOrderDispatcherFromListWithCfg(aa, store, nil, cfg)
+	if ad == nil {
+		t.Fatal("expected non-nil dispatcher")
+	}
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(50 * time.Millisecond)
+
+	work := workBeadByOrderLabel(t, store, "order-run:dog-order")
+	if work.Metadata["gc.routed_to"] != "maintenance.dog" {
+		t.Errorf("gc.routed_to = %q, want %q (should resolve binding prefix)", work.Metadata["gc.routed_to"], "maintenance.dog")
 	}
 }
 
