@@ -189,25 +189,26 @@ Nudges from other agents may arrive via your hook. When working:
 
 ---
 
-## FINAL REMINDER: RUN THE DONE SEQUENCE
+## FINAL REMINDER: COMPLETE YOUR FORMULA AND EXIT
 
-**Before your session ends, you MUST run the done sequence.**
+**Before your session ends, you MUST complete your formula's final step in full.**
 
+Every formula has a specific completion step (e.g., `submit-and-exit`,
+`notify-close`). Read it carefully and execute every instruction in it — do
+NOT substitute or skip steps. The formula step contains the correct done
+sequence for your specific work type. A polecat running `mol-review-leg`
+must follow `notify-close` (mail coordinator, close bead); a polecat running
+`mol-polecat-work` must follow `submit-and-exit` (push, reassign to refinery).
+
+All completion paths end with:
 ```bash
-git push origin HEAD
-gc bd update <work-bead> \
-  --set-metadata branch=$(git branch --show-current) \
-  --set-metadata target={{ .DefaultBranch }} \
-  --notes "Implemented: <brief summary>"
-gc bd update <work-bead> --status=open --assignee={{ .RigName }}/refinery --set-metadata gc.routed_to={{ .RigName }}/refinery
 gc runtime drain-ack
 exit
 ```
 
-Your work is not complete until you run these commands. `gc runtime drain-ack`
-signals the reconciler to kill this session — it will only restart you if the
-pool check command finds more work. Sitting idle after finishing implementation
-is the "Idle Polecat heresy."
+`gc runtime drain-ack` signals the reconciler to kill this session — it will
+only restart you if the pool check command finds more work. Sitting idle after
+finishing is the "Idle Polecat heresy."
 
 ---
 
@@ -217,7 +218,7 @@ is the "Idle Polecat heresy."
 
 | Want to... | Correct command |
 |------------|----------------|
-| Signal work complete | Done sequence (push, set metadata, reassign, `gc runtime drain-ack`, exit) |
+| Signal work complete | Follow formula's final step fully, then `gc runtime drain-ack && exit` |
 | Read formula steps | `gc bd show <wisp-id>` (shows formula ref) |
 | Escalate blocker | `gc mail send {{ .RigName }}/witness -s "ESCALATION: desc [HIGH]" -m "..."` |
 | Context exhaustion | `gc runtime request-restart` |
