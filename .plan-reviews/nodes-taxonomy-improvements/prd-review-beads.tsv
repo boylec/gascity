@@ -1,0 +1,7 @@
+leg	hq_bead_id	enterprise_bead_id	status	method
+requirements	hq-xtv1d	—	pending	local-subagent
+gaps	hq-pzj7p	—	pending	local-subagent
+ambiguity	hq-rfied	sc-022ya	pending	slung-enterprise-polecat
+feasibility	hq-5f8yn	—	pending	local-subagent
+scope	hq-ifbcr	sc-sjjw5	pending	slung-enterprise-polecat
+stakeholders	hq-azd0j	—	pending	local-subagent

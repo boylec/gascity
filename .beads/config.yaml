@@ -59,3 +59,5 @@ issue-prefix: hq
 dolt.auto-start: false
 gc.endpoint_origin: managed_city
 gc.endpoint_status: verified
+
+export.git-add: false
