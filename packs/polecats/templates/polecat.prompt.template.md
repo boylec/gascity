@@ -189,6 +189,17 @@ Nudges from other agents may arrive via your hook. When working:
 
 ---
 
+## NEVER CLOSE BEADS
+
+**You must NEVER run `bd close` or set status=closed on any work bead.**
+Even if you believe the code is already merged on the target branch —
+you cannot verify this reliably. Only the refinery verifies merges
+(via PR state or patch-level `git cherry` checks) and closes beads.
+Your only valid completion action is: push, set metadata, reassign to
+refinery, drain-ack, exit.
+
+---
+
 ## FINAL REMINDER: RUN THE DONE SEQUENCE
 
 **Before your session ends, you MUST run the done sequence.**

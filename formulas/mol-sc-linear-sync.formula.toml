@@ -27,28 +27,74 @@ version = 1
 
 [[steps]]
 id = "find-unreconciled"
-title = "Find closed convoys with linear_id that have not been transitioned"
+title = "Find closed beads that reference a Linear issue (SAF-*) and have not been transitioned"
 description = '''
-Query beads for closed convoys with Linear linkage but no transition
-timestamp. Emit the list of convoy IDs + Linear IDs to process.
+Query beads for ANY closed bead (any type) that references a Linear issue and
+hasn't yet been stamped with sc.linear_transitioned_at.
+
+The user's convention: many beads may reference the same Linear issue (e.g.
+SAF-88 is split into multiple sub-task beads). The Linear ID is found by
+trying, in order:
+
+  1. metadata.linear_id (legacy / mol-sc-idea-to-plan beads)
+  2. external_ref matching "^linear-SAF-\\d+" (linear:NNN external ref)
+  3. title matching "\\bSAF-\\d+\\b" (most common: user writes "SAF-401:" in title)
+  4. description matching "\\bSAF-\\d+\\b"
+
+De-dupe: first-closer-wins. When multiple closed beads match the SAME Linear
+issue, only one entry is emitted (the others are noop — the Linear transition
+is idempotent but we don't need to call it repeatedly).
 
 ```bash
 OUT="/tmp/sc-linear-sync-$(date +%s).jsonl"
 
-bd list --status=closed --type=convoy --json 2>/dev/null \
-  | jq -c '.[] | select(
-      (.metadata.linear_id // "") != "" and
-      (.metadata.sc.linear_transitioned_at // "") == ""
-    ) | {convoy: .id, linear_id: .metadata.linear_id}' \
-  > "$OUT"
+# Use gc bd --rig=enterprise to target the SafetyChain bead store.
+# gc bd list without --status explicitly set returns only open-ish beads;
+# we need BOTH closed and non-closed to de-dupe properly. Union them.
+ALL="/tmp/sc-linear-sync-all-$(date +%s).jsonl"
+(
+  gc bd --rig=enterprise list --status=closed  --limit=0 --json 2>/dev/null
+  gc bd --rig=enterprise list --status=open    --limit=0 --json 2>/dev/null
+  gc bd --rig=enterprise list --status=in_progress --limit=0 --json 2>/dev/null
+  gc bd --rig=enterprise list --status=blocked --limit=0 --json 2>/dev/null
+) \
+  | jq -c '.[] |
+      (.metadata.linear_id // "") as $m |
+      ((.external_ref // "") | capture("linear-(?<id>SAF-\\d+)").id // "") as $x |
+      ((.title // "") | capture("\\b(?<id>SAF-\\d+)\\b").id // "") as $t |
+      ((.description // "") | capture("\\b(?<id>SAF-\\d+)\\b").id // "") as $d |
+      ([$m, $x, $t, $d] | map(select(. != "")) | (.[0] // "")) as $linear_id |
+      select($linear_id != "") |
+      {bead: .id,
+       linear_id: $linear_id,
+       status: .status,
+       closed_at: (.closed_at // ""),
+       stamped: ((.metadata["sc.linear_transitioned_at"] // "") != "")}' \
+  > "$ALL"
+
+# For each distinct Linear ID, skip if ANY bead (open or closed) with that
+# Linear ID is already stamped. Otherwise pick the earliest-closed closed bead
+# as the stamp target. If no closed bead exists for that Linear ID, skip
+# (nothing to transition yet).
+jq -s '
+  group_by(.linear_id) |
+  map(
+    select(any(.[]; .stamped) | not) |
+    map(select(.status == "closed")) |
+    select(length > 0) |
+    sort_by(.closed_at)[0]
+  )
+' "$ALL" | jq -c '.[]' > "$OUT"
+rm -f "$ALL"
 
 COUNT=$(wc -l < "$OUT" | awk '{print $1}')
-echo "Unreconciled closed convoys: $COUNT"
+echo "Unreconciled Linear references: $COUNT (distinct Linear IDs)"
 echo "$OUT" > /tmp/sc-linear-sync-current.path
 ```
 
-Exit criteria: newline-delimited JSON with {convoy, linear_id} per bead at
-the path recorded in /tmp/sc-linear-sync-current.path.
+Exit criteria: newline-delimited JSON with {bead, linear_id, closed_at} per
+distinct Linear ID at the path recorded in /tmp/sc-linear-sync-current.path.
+Each Linear ID appears at most once (de-duped across many-beads-per-issue).
 '''
 
 [[steps]]
@@ -69,14 +115,17 @@ FAILURES=0
 SUCCESSES=0
 
 while IFS= read -r LINE; do
-  CONVOY=$(printf '%s' "$LINE" | jq -r '.convoy')
+  BEAD=$(printf '%s' "$LINE" | jq -r '.bead')
   LINEAR_ID=$(printf '%s' "$LINE" | jq -r '.linear_id')
 
   # Attempt the MCP transition. Run this via the provider's MCP call.
   # Pseudo: mcp linear-server save_issue id=$LINEAR_ID state="In Review"
-  # If the attempt succeeds, stamp the transition timestamp.
+  # If the attempt succeeds, stamp the transition timestamp on the
+  # representative bead (the first-closer that won de-dup in find-unreconciled).
+  # Other beads that reference the same Linear ID will be skipped on the next
+  # run because this bead's stamp is compared via the distinct-linear-id dedup.
   if mcp_save_issue_ok "$LINEAR_ID" "In Review"; then
-    bd update "$CONVOY" \
+    gc bd --rig=enterprise update "$BEAD" \
       --set-metadata "sc.linear_transitioned_at=$(date -u +%FT%TZ)"
     SUCCESSES=$((SUCCESSES + 1))
   else
