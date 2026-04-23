@@ -1194,6 +1194,18 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 	}
 	open := sessionBeads.Open()
 
+	// Claim routed-but-unassigned work for idle pool sessions. This bridges
+	// the gap where min_active_sessions keeps a session alive but routed work
+	// has no assignee — the session's hook only discovers assigned work.
+	if !result.StoreQueryPartial {
+		claimStores := make([]beads.Store, 0, 1+len(rigStores))
+		claimStores = append(claimStores, store)
+		for _, rs := range rigStores {
+			claimStores = append(claimStores, rs)
+		}
+		claimRoutedWorkForIdleSessions(cr.cfg, claimStores, open, assignedWorkBeads, cr.stderr)
+	}
+
 	// Use cr.cityName consistently — it's the authoritative runtime name.
 	cityName := cr.cityName
 
