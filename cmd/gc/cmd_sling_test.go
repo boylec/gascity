@@ -5081,6 +5081,129 @@ func TestDoSlingCrossRigFormulaExempt(t *testing.T) {
 	}
 }
 
+func TestCrossRigMaterializationCopiesContent(t *testing.T) {
+	sourceStore := beads.NewMemStore()
+	sourceBead, err := sourceStore.Create(beads.Bead{
+		Title:       "Review: ambiguity analysis",
+		Description: "Analyze the PRD for vague language and contradictions.",
+		Type:        "task",
+		Labels:      []string{"review"},
+		Metadata: map[string]string{
+			"coordinator":  "hq-mayor",
+			"review_id":    "saf-88-api-guidelines",
+			"review_phase": "prd",
+			"review_leg":   "ambiguity",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create source bead: %v", err)
+	}
+
+	targetStore := beads.NewMemStore()
+
+	copyMeta := make(map[string]string, len(sourceBead.Metadata)+2)
+	for k, v := range sourceBead.Metadata {
+		copyMeta[k] = v
+	}
+	copyMeta["gc.source_bead_id"] = sourceBead.ID
+	copyMeta["gc.source_store_ref"] = "rig:hq"
+
+	created, err := targetStore.Create(beads.Bead{
+		Title:       sourceBead.Title,
+		Description: sourceBead.Description,
+		Type:        sourceBead.Type,
+		Priority:    sourceBead.Priority,
+		Labels:      sourceBead.Labels,
+		Metadata:    copyMeta,
+	})
+	if err != nil {
+		t.Fatalf("materialize bead: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatal("materialized bead has empty ID")
+	}
+	if created.Title != sourceBead.Title {
+		t.Errorf("title = %q, want %q", created.Title, sourceBead.Title)
+	}
+	if created.Description != sourceBead.Description {
+		t.Errorf("description = %q, want %q", created.Description, sourceBead.Description)
+	}
+	if created.Type != sourceBead.Type {
+		t.Errorf("type = %q, want %q", created.Type, sourceBead.Type)
+	}
+	if created.Metadata["coordinator"] != "hq-mayor" {
+		t.Errorf("coordinator = %q, want %q", created.Metadata["coordinator"], "hq-mayor")
+	}
+	if created.Metadata["review_id"] != "saf-88-api-guidelines" {
+		t.Errorf("review_id = %q, want %q", created.Metadata["review_id"], "saf-88-api-guidelines")
+	}
+	if created.Metadata["review_phase"] != "prd" {
+		t.Errorf("review_phase = %q, want %q", created.Metadata["review_phase"], "prd")
+	}
+	if created.Metadata["review_leg"] != "ambiguity" {
+		t.Errorf("review_leg = %q, want %q", created.Metadata["review_leg"], "ambiguity")
+	}
+	if created.Metadata["gc.source_bead_id"] != sourceBead.ID {
+		t.Errorf("gc.source_bead_id = %q, want %q", created.Metadata["gc.source_bead_id"], sourceBead.ID)
+	}
+	if created.Metadata["gc.source_store_ref"] != "rig:hq" {
+		t.Errorf("gc.source_store_ref = %q, want %q", created.Metadata["gc.source_store_ref"], "rig:hq")
+	}
+
+	got, err := targetStore.Get(created.ID)
+	if err != nil {
+		t.Fatalf("target store.Get(%s): %v", created.ID, err)
+	}
+	if got.Description != sourceBead.Description {
+		t.Errorf("persisted description = %q, want %q", got.Description, sourceBead.Description)
+	}
+}
+
+func TestCrossRigMaterializationWithFormulaAttachment(t *testing.T) {
+	runner := newFakeRunner()
+	sp := runtime.NewFake()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Rigs: []config.Rig{
+			{Name: "hello-world", Path: "/tmp/hw"},
+			{Name: "other", Path: "/tmp/other", Prefix: "FE"},
+		},
+	}
+	a := config.Agent{Name: "polecat", Dir: "hello-world"}
+
+	deps, stdout, stderr := testDeps(cfg, sp, runner.run)
+
+	sourceBead, err := deps.Store.Create(beads.Bead{
+		Title:       "Review task",
+		Description: "Full review prompt with detailed instructions.",
+		Type:        "task",
+		Metadata: map[string]string{
+			"coordinator":  "hq-coordinator",
+			"review_id":    "test-review",
+			"review_phase": "prd",
+			"review_leg":   "gaps",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create source bead: %v", err)
+	}
+
+	opts := testOpts(a, sourceBead.ID)
+	opts.Force = true
+	code := doSling(opts, deps, deps.Store, stdout, stderr)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	got, err := deps.Store.Get(sourceBead.ID)
+	if err != nil {
+		t.Fatalf("store.Get(%s): %v", sourceBead.ID, err)
+	}
+	if got.Metadata["gc.routed_to"] != "hello-world/polecat" {
+		t.Errorf("gc.routed_to = %q, want %q", got.Metadata["gc.routed_to"], "hello-world/polecat")
+	}
+}
+
 // --- New tests for shell quoting, helpers, and edge cases ---
 
 func TestShellQuote(t *testing.T) {
