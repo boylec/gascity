@@ -273,6 +273,57 @@ func cmdSling(args []string, isFormula, doNudge, force bool, title string, vars 
 		}
 	}
 
+	// Cross-rig materialization: when routing a bead to an agent in a
+	// different rig, copy it to the target store so the worker can read
+	// it. Without this, the bead only exists in the source rig's store
+	// and workers querying their own rig's store never see it.
+	beadResolvesInSourceStore, _ := sling.ProbeBeadInStore(store, beadOrFormula)
+	if !isFormula && !dryRun && looksLikeBeadID(beadOrFormula) && beadResolvesInSourceStore {
+		crossRigMsg := checkCrossRig(beadOrFormula, a, cfg)
+		if crossRigMsg != "" && force {
+			targetRigDir := rigDirForAgent(cfg, a)
+			if targetRigDir != "" {
+				targetStoreDir := resolveStoreScopeRoot(cityPath, targetRigDir)
+				if !samePath(targetStoreDir, storeDir) {
+					targetStore, targetErr := openStoreAtForCity(targetStoreDir, cityPath)
+					if targetErr != nil {
+						fmt.Fprintf(stderr, "gc sling: opening target store %s: %v\n", targetStoreDir, targetErr) //nolint:errcheck // best-effort stderr
+						return 1
+					}
+					sourceBead, readErr := store.Get(beadOrFormula)
+					if readErr != nil {
+						fmt.Fprintf(stderr, "gc sling: reading source bead %s: %v\n", beadOrFormula, readErr) //nolint:errcheck // best-effort stderr
+						return 1
+					}
+					copyMeta := make(map[string]string, len(sourceBead.Metadata)+2)
+					for k, v := range sourceBead.Metadata {
+						copyMeta[k] = v
+					}
+					copyMeta["gc.source_bead_id"] = beadOrFormula
+					copyMeta["gc.source_store_ref"] = storeRef
+					created, createErr := targetStore.Create(beads.Bead{
+						Title:       sourceBead.Title,
+						Description: sourceBead.Description,
+						Type:        sourceBead.Type,
+						Priority:    sourceBead.Priority,
+						Labels:      sourceBead.Labels,
+						Metadata:    copyMeta,
+					})
+					if createErr != nil {
+						fmt.Fprintf(stderr, "gc sling: materializing bead in target store: %v\n", createErr) //nolint:errcheck // best-effort stderr
+						return 1
+					}
+					fmt.Fprintf(stdout, "Cross-rig: materialized %s → %s\n", beadOrFormula, created.ID) //nolint:errcheck // best-effort stdout
+					beadOrFormula = created.ID
+					store = targetStore
+					storeDir = targetStoreDir
+					storeRef = workflowStoreRefForDir(storeDir, cityPath, cityName, cfg)
+					storeEnv = slingStoreEnv(cfg, cityPath, storeDir)
+				}
+			}
+		}
+	}
+
 	opts := slingOpts{
 		Target:        a,
 		BeadOrFormula: beadOrFormula,
