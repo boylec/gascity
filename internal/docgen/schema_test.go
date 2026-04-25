@@ -187,6 +187,36 @@ func TestCitySchemaOrderOverrideIncludesLegacyGateAlias(t *testing.T) {
 	}
 }
 
+// TestCitySchemaCityAgentNotRequired guards against the regression where
+// City.Agents was reflected as a required property because its TOML tag
+// lacked omitempty. Real cities use [imports.*] (PackV2) and ship without
+// any [[agent]] block; the schema must reflect that.
+func TestCitySchemaCityAgentNotRequired(t *testing.T) {
+	s, err := GenerateCitySchema()
+	if err != nil {
+		t.Fatalf("GenerateCitySchema: %v", err)
+	}
+
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	defs := raw["$defs"].(map[string]interface{})
+	city := defs["City"].(map[string]interface{})
+	required, _ := city["required"].([]interface{})
+	for _, r := range required {
+		if r == "agent" {
+			t.Errorf("City.required includes %q; PackV2 cities ship without [[agent]] blocks — Agents needs omitempty", "agent")
+		}
+	}
+}
+
 func TestCitySchemaAgentDefinition(t *testing.T) {
 	s, err := GenerateCitySchema()
 	if err != nil {
