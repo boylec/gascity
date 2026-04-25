@@ -2501,6 +2501,10 @@ func PackContentHashRecursive(fs fsys.FS, topoDir string) string {
 }
 
 // collectFiles recursively collects file paths relative to base.
+// Skips SCM working-copy directories and gascity-internal state
+// directories — these are never pack content, and a rig configured with
+// `source = "."` would otherwise pull the entire working copy (including
+// gigabytes of git history and Dolt data) into the pack hash.
 func collectFiles(fs fsys.FS, base, prefix string, out *[]string) {
 	dir := base
 	if prefix != "" {
@@ -2511,6 +2515,9 @@ func collectFiles(fs fsys.FS, base, prefix string, out *[]string) {
 		return
 	}
 	for _, e := range entries {
+		if e.IsDir() && skipPackContentDir(e.Name()) {
+			continue
+		}
 		rel := e.Name()
 		if prefix != "" {
 			rel = prefix + "/" + e.Name()
@@ -2521,6 +2528,20 @@ func collectFiles(fs fsys.FS, base, prefix string, out *[]string) {
 			*out = append(*out, rel)
 		}
 	}
+}
+
+// skipPackContentDir reports whether a directory name should be skipped
+// when walking pack content. The set is intentionally narrow: only SCM
+// working-copy directories and gascity-internal state directories that
+// are never legitimate pack content. Hidden directories that DO appear
+// in published packs (.claude, .gemini, .cursor, .codex, .github, .omp,
+// .gitkeep parents, ...) are not in this list and continue to be hashed.
+func skipPackContentDir(name string) bool {
+	switch name {
+	case ".git", ".hg", ".svn", ".bzr", ".gc", ".beads":
+		return true
+	}
+	return false
 }
 
 // resolveNamedPacks translates named pack references to cache paths.
