@@ -62,6 +62,9 @@ func (c *CachingStore) ApplyEvent(eventType string, payload json.RawMessage) {
 		c.updateStatsLocked()
 		mutated = true
 	case "bead.updated":
+		if existing, ok := c.beads[b.ID]; ok && !beadChanged(existing, b) {
+			break
+		}
 		c.noteMutationLocked(b.ID)
 		c.beads[b.ID] = cloneBead(b)
 		delete(c.dirty, b.ID)
