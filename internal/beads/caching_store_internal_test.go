@@ -759,3 +759,125 @@ func TestCachingStoreApplyEventBeadUpdatedSkipsRewriteOnIdenticalPayload(t *test
 		t.Fatalf("ApplyEvent rewrote cache entry on idempotent event: Metadata table pointer changed (%x -> %x)", metaPtrBefore, metaPtrAfter)
 	}
 }
+
+// TestCachingStoreApplyEventBeadClosedDeletesFromActiveCache reproduces the
+// closed-bead retention bug at caching_store_events.go:73-80. The active cache
+// is meant to hold only open/in-progress beads (per PrimeActive at :121), but
+// ApplyEvent("bead.closed") writes the closed bead into c.beads instead of
+// deleting it. Until the next reconciler sweep, dead entries pile up.
+func TestCachingStoreApplyEventBeadClosedDeletesFromActiveCache(t *testing.T) {
+	t.Parallel()
+
+	backing := NewMemStore()
+	bead, err := backing.Create(Bead{Title: "Test"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	cache := NewCachingStoreForTest(backing, nil)
+	if err := cache.Prime(context.Background()); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+
+	cache.mu.RLock()
+	_, before := cache.beads[bead.ID]
+	cache.mu.RUnlock()
+	if !before {
+		t.Fatalf("bead %q expected in cache before close event", bead.ID)
+	}
+
+	// Pre-close in backing (matches production lifecycle: bd close runs
+	// before the hook event arrives).
+	if err := backing.Close(bead.ID); err != nil {
+		t.Fatalf("Close backing: %v", err)
+	}
+
+	closed := bead
+	closed.Status = "closed"
+	payload, err := json.Marshal(closed)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	cache.ApplyEvent("bead.closed", payload)
+
+	cache.mu.RLock()
+	_, after := cache.beads[bead.ID]
+	deletedSeq, hasDeletedSeq := cache.deletedSeq[bead.ID]
+	cache.mu.RUnlock()
+	if after {
+		t.Fatalf("bead %q should be evicted from active cache after close event", bead.ID)
+	}
+	if !hasDeletedSeq || deletedSeq == 0 {
+		t.Fatalf("deletedSeq[%q] should be set, got %d (present=%v)", bead.ID, deletedSeq, hasDeletedSeq)
+	}
+}
+
+// TestCachingStoreCloseDeletesFromActiveCache reproduces the same bug at
+// caching_store_writes.go:83-91 (the in-cache branch of Close()).
+func TestCachingStoreCloseDeletesFromActiveCache(t *testing.T) {
+	t.Parallel()
+
+	backing := NewMemStore()
+	bead, err := backing.Create(Bead{Title: "Test"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	cache := NewCachingStoreForTest(backing, nil)
+	if err := cache.Prime(context.Background()); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+
+	if err := cache.Close(bead.ID); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	cache.mu.RLock()
+	_, after := cache.beads[bead.ID]
+	deletedSeq, hasDeletedSeq := cache.deletedSeq[bead.ID]
+	cache.mu.RUnlock()
+	if after {
+		t.Fatalf("bead %q should be evicted from active cache after Close()", bead.ID)
+	}
+	if !hasDeletedSeq || deletedSeq == 0 {
+		t.Fatalf("deletedSeq[%q] should be set, got %d (present=%v)", bead.ID, deletedSeq, hasDeletedSeq)
+	}
+}
+
+// TestCachingStoreCloseAllDeletesClosedFromActiveCache reproduces the same bug
+// at caching_store_writes.go:140-153 (the CloseAll inner loop).
+func TestCachingStoreCloseAllDeletesClosedFromActiveCache(t *testing.T) {
+	t.Parallel()
+
+	backing := NewMemStore()
+	bead1, err := backing.Create(Bead{Title: "Test1"})
+	if err != nil {
+		t.Fatalf("Create 1: %v", err)
+	}
+	bead2, err := backing.Create(Bead{Title: "Test2"})
+	if err != nil {
+		t.Fatalf("Create 2: %v", err)
+	}
+
+	cache := NewCachingStoreForTest(backing, nil)
+	if err := cache.Prime(context.Background()); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+
+	if _, err := cache.CloseAll([]string{bead1.ID, bead2.ID}, nil); err != nil {
+		t.Fatalf("CloseAll: %v", err)
+	}
+
+	for _, id := range []string{bead1.ID, bead2.ID} {
+		cache.mu.RLock()
+		_, after := cache.beads[id]
+		deletedSeq, hasDeletedSeq := cache.deletedSeq[id]
+		cache.mu.RUnlock()
+		if after {
+			t.Fatalf("bead %q should be evicted from active cache after CloseAll", id)
+		}
+		if !hasDeletedSeq || deletedSeq == 0 {
+			t.Fatalf("deletedSeq[%q] should be set, got %d (present=%v)", id, deletedSeq, hasDeletedSeq)
+		}
+	}
+}
