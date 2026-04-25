@@ -835,6 +835,11 @@ type Workspace struct {
 	// "gc rig add" is called without --include. Allows cities to define
 	// a default pack for all rigs.
 	DefaultRigIncludes []string `toml:"default_rig_includes,omitempty"`
+	// Env defines workspace-wide environment variables applied to every
+	// managed session. Lowest config-precedence — overridden by provider,
+	// agent, and patch env. Use for cross-cutting variables like
+	// GC_TARGET_BRANCH that every agent should inherit.
+	Env map[string]string `toml:"env,omitempty"`
 }
 
 // BeadsConfig holds bead store settings.
