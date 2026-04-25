@@ -128,8 +128,10 @@ type City struct {
 	// binding name; the value specifies the source and optional version,
 	// export, and transitive controls. Processed during ExpandCityPacks.
 	Imports map[string]Import `toml:"imports,omitempty"`
-	// Agents lists all configured agents in this city.
-	Agents []Agent `toml:"agent"`
+	// Agents lists all configured agents in this city. Optional: PackV2
+	// cities compose agents through [imports.*] and ship without any
+	// [[agent]] block.
+	Agents []Agent `toml:"agent,omitempty"`
 	// NamedSessions lists canonical alias-backed sessions built from
 	// reusable agent templates.
 	NamedSessions []NamedSession `toml:"named_session,omitempty"`

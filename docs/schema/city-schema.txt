@@ -915,7 +915,7 @@
             "$ref": "#/$defs/Agent"
           },
           "type": "array",
-          "description": "Agents lists all configured agents in this city."
+          "description": "Agents lists all configured agents in this city. Optional: PackV2\ncities compose agents through [imports.*] and ship without any\n[[agent]] block."
         },
         "named_session": {
           "items": {
@@ -998,8 +998,7 @@
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "workspace",
-        "agent"
+        "workspace"
       ],
       "description": "City is the top-level configuration for a Gas City instance."
     },
