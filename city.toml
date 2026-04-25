@@ -1,7 +1,10 @@
-agent = []
-
 [workspace]
+name = "safetychain"
 provider = "claude"
+global_fragments = ["command-glossary", "operational-awareness"]
+
+[workspace.env]
+GC_TARGET_BRANCH = "boylec/develop"
 
 [[rigs]]
 name = "enterprise"
@@ -19,15 +22,11 @@ source = "./packs/polecats"
 agent = "polecat"
 max_active_sessions = 3
 min_active_sessions = 1
-[rigs.overrides.env]
-GC_TARGET_BRANCH = "boylec/develop"
 
 [[rigs.overrides]]
 agent = "refinery"
 max_active_sessions = 3
 min_active_sessions = 1
-[rigs.overrides.env]
-GC_TARGET_BRANCH = "boylec/develop"
 
 [[rigs]]
 name = "gascity"
@@ -56,8 +55,8 @@ dolt_port = "53930"
 startup_timeout = "180s"
 
 [daemon]
+formula_v2 = true
 patrol_interval = "30s"
 max_restarts = 5
 restart_window = "1h"
 shutdown_timeout = "5s"
-formula_v2 = true

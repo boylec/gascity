@@ -4,18 +4,10 @@ schema = 2
 version = "0.1.0"
 
 [imports.gastown]
-# Materialized into .gc/ by `gc init` from the gascity binary's embedded copy.
-# Version-locked to the installed gc; upgrade via `brew upgrade gastownhall/gascity/gascity`.
 source = "./.gc/system/packs/gastown"
 
 [agent_defaults]
-append_fragments = [
-    "command-glossary",
-    "operational-awareness",
-    "linear-transitions",
-    "target-branch-override",
-    "sc-policy",
-]
+append_fragments = ["linear-transitions", "target-branch-override", "sc-policy"]
 
 [providers.claude]
 base = "claude"
@@ -47,6 +39,6 @@ base = "claude"
 ready_delay_ms = 0
 
 [providers.claude-sonnet.option_defaults]
-effort = "medium"
+effort = "high"
 model = "sonnet"
 permission_mode = "unrestricted"

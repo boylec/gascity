@@ -9,3 +9,9 @@ include = ["city.toml"]
 
 [rule.schema]
 path = "docs/schema/city-schema.json"
+
+[[rule]]
+include = ["**/pack.toml"]
+
+[rule.schema]
+path = "docs/schema/pack-schema.json"

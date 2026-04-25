@@ -26,3 +26,6 @@ scripts/
 .beads/*
 !.beads/config.yaml
 !.beads/metadata.json
+
+# Runtime trace log written by control-dispatcher
+control-dispatcher-trace.log
