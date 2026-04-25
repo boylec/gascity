@@ -641,6 +641,54 @@ func TestPackContentHashRecursive(t *testing.T) {
 	}
 }
 
+// TestPackContentHashRecursive_SkipsScmAndStateDirectories verifies that
+// SCM working-copy directories (.git, .hg, .svn) and gascity-internal
+// state directories (.gc, .beads) do not contribute to the pack content
+// hash. These are not pack content; including them turns Revision into a
+// recursive walk over potentially gigabytes of git history and dolt data,
+// causing supervisor RSS to spike to tens of GB on cities whose rig pack
+// source is `.` (the rig root).
+//
+// Legitimate hidden files inside non-excluded directories (e.g.
+// overlay/.claude, overlay/.gitkeep, overlay/.gemini used by per-provider
+// pack overlays) must continue to be included.
+func TestPackContentHashRecursive_SkipsScmAndStateDirectories(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "pack.toml", "test")
+	writeFile(t, dir, "prompts/a.md", "prompt a")
+	// Legitimate hidden content inside an overlay directory (per-provider
+	// configs follow this pattern in the bootstrap core pack).
+	writeFile(t, dir, "overlay/.claude/settings.json", `{"k":"v"}`)
+	writeFile(t, dir, "overlay/.gitkeep", "")
+
+	baseline := PackContentHashRecursive(fsys.OSFS{}, dir)
+
+	// Adding files under SCM/state directories must not change the hash —
+	// they are not pack content.
+	writeFile(t, dir, ".git/HEAD", "ref: refs/heads/main")
+	writeFile(t, dir, ".git/objects/pack/pack-abcdef.idx", "fake pack idx")
+	writeFile(t, dir, ".beads/dolt/some-blob", "lots of bytes here")
+	writeFile(t, dir, ".gc/runtime/dolt/data.bin", "more bytes")
+	writeFile(t, dir, ".hg/store/data", "mercurial state")
+	writeFile(t, dir, ".svn/wc.db", "svn state")
+
+	withScmState := PackContentHashRecursive(fsys.OSFS{}, dir)
+
+	if baseline != withScmState {
+		t.Errorf("PackContentHashRecursive must skip .git/, .beads/, .gc/, .hg/, .svn/.\n  baseline:        %s\n  with scm/state:  %s", baseline, withScmState)
+	}
+
+	// Sanity: legitimate hidden files (overlay/.claude/...) must still
+	// contribute to the hash. Removing one should change the hash.
+	if err := os.Remove(filepath.Join(dir, "overlay", ".claude", "settings.json")); err != nil {
+		t.Fatalf("remove overlay/.claude/settings.json: %v", err)
+	}
+	withoutLegit := PackContentHashRecursive(fsys.OSFS{}, dir)
+	if withoutLegit == baseline {
+		t.Error("hash should change when legitimate hidden pack-content file (overlay/.claude/settings.json) is removed; the fix must NOT skip arbitrary hidden files, only specific SCM/state directories")
+	}
+}
+
 func TestExpandPacks_ViaLoadWithIncludes(t *testing.T) {
 	dir := t.TempDir()
 
