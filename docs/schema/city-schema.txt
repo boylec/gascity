@@ -2039,6 +2039,13 @@
           },
           "type": "array",
           "description": "DefaultRigIncludes lists pack directories applied to new rigs when\n\"gc rig add\" is called without --include. Allows cities to define\na default pack for all rigs."
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Env defines workspace-wide environment variables applied to every\nmanaged session. Lowest config-precedence — overridden by provider,\nagent, and patch env. Use for cross-cutting variables like\nGC_TARGET_BRANCH that every agent should inherit."
         }
       },
       "additionalProperties": false,
