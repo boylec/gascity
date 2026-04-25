@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -701,4 +702,60 @@ func (s *closeAllRefreshFailingStore) CloseAll(ids []string, _ map[string]string
 func (s *closeAllRefreshFailingStore) List(query ListQuery) ([]Bead, error) {
 	s.listCalls++
 	return s.Store.List(query)
+}
+
+// TestCachingStoreApplyEventBeadUpdatedSkipsRewriteOnIdenticalPayload reproduces
+// the unconditional-write bug in ApplyEvent("bead.updated"). The cache currently
+// rewrites the entry (via cloneBead) on every event delivery, even when the
+// incoming bead is byte-identical to the cached value. The duplicate write
+// allocates a fresh Metadata map each time and drives heap allocation churn
+// over time.
+//
+// The test verifies behavior, not allocation counts directly: after a
+// byte-identical event delivery, the cached Bead's Metadata map header should
+// still point to the same underlying hashtable. cloneBead's per-call allocation
+// of a new map is the observable side effect.
+func TestCachingStoreApplyEventBeadUpdatedSkipsRewriteOnIdenticalPayload(t *testing.T) {
+	t.Parallel()
+
+	backing := NewMemStore()
+	bead, err := backing.Create(Bead{
+		Title:    "Test bead",
+		Type:     "task",
+		Metadata: map[string]string{"key": "value"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	cache := NewCachingStoreForTest(backing, nil)
+	if err := cache.Prime(context.Background()); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+
+	// Capture the cached Metadata map's underlying-table pointer.
+	cache.mu.RLock()
+	metaPtrBefore := reflect.ValueOf(cache.beads[bead.ID].Metadata).Pointer()
+	cache.mu.RUnlock()
+
+	// Marshal the same bead and deliver it as a bead.updated event.
+	// The cache already holds this state, so the event is idempotent and
+	// the cache entry should not be rewritten.
+	cached, err := cache.Get(bead.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	payload, err := json.Marshal(cached)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	cache.ApplyEvent("bead.updated", payload)
+
+	cache.mu.RLock()
+	metaPtrAfter := reflect.ValueOf(cache.beads[bead.ID].Metadata).Pointer()
+	cache.mu.RUnlock()
+
+	if metaPtrAfter != metaPtrBefore {
+		t.Fatalf("ApplyEvent rewrote cache entry on idempotent event: Metadata table pointer changed (%x -> %x)", metaPtrBefore, metaPtrAfter)
+	}
 }
