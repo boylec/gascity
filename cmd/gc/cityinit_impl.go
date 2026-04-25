@@ -316,7 +316,7 @@ func (localInitializer) Scaffold(_ context.Context, req cityinit.InitRequest) (*
 	if cityHasScaffoldFS(fsys.OSFS{}, dir) {
 		return nil, cityinit.ErrAlreadyInitialized
 	}
-	if code := doInit(fsys.OSFS{}, dir, wiz, req.NameOverride, io.Discard, io.Discard); code != 0 {
+	if code := doInit(fsys.OSFS{}, dir, wiz, req.NameOverride, io.Discard, io.Discard, false); code != 0 {
 		if dirExisted && rollbackState != nil {
 			if markErr := rollbackState.markScaffoldState(); markErr != nil {
 				return nil, errors.Join(fmt.Errorf("scaffold failed (exit %d)", code), fmt.Errorf("snapshot scaffold state for rollback: %w", markErr))
@@ -420,7 +420,7 @@ func (localInitializer) Init(_ context.Context, req cityinit.InitRequest) (*city
 	// narration). The API path discards those; error return is
 	// carried as an exit code, which we translate into typed
 	// sentinels below.
-	if code := doInit(fsys.OSFS{}, dir, wiz, req.NameOverride, io.Discard, io.Discard); code != 0 {
+	if code := doInit(fsys.OSFS{}, dir, wiz, req.NameOverride, io.Discard, io.Discard, false); code != 0 {
 		if code == initExitAlreadyInitialized {
 			return nil, cityinit.ErrAlreadyInitialized
 		}
