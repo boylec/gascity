@@ -187,6 +187,78 @@ func TestCitySchemaOrderOverrideIncludesLegacyGateAlias(t *testing.T) {
 	}
 }
 
+func TestGeneratePackSchema(t *testing.T) {
+	s, err := GeneratePackSchema()
+	if err != nil {
+		t.Fatalf("GeneratePackSchema: %v", err)
+	}
+
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	props := defProperties(t, raw, "PackConfig")
+	for _, expected := range []string{"pack", "imports", "agent", "providers", "service", "commands"} {
+		if _, ok := props[expected]; !ok {
+			t.Errorf("missing PackConfig property %q", expected)
+		}
+	}
+}
+
+func TestPackSchemaPackMetaRequired(t *testing.T) {
+	s, err := GeneratePackSchema()
+	if err != nil {
+		t.Fatalf("GeneratePackSchema: %v", err)
+	}
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	defs := raw["$defs"].(map[string]interface{})
+	pack := defs["PackConfig"].(map[string]interface{})
+	required, _ := pack["required"].([]interface{})
+	found := false
+	for _, r := range required {
+		if r == "pack" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("PackConfig.required = %v, want to include %q ([pack] block is mandatory in pack.toml)", required, "pack")
+	}
+}
+
+func TestPackSchemaAliasFieldHidden(t *testing.T) {
+	s, err := GeneratePackSchema()
+	if err != nil {
+		t.Fatalf("GeneratePackSchema: %v", err)
+	}
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	props := defProperties(t, raw, "PackConfig")
+	if _, ok := props["agents"]; ok {
+		t.Errorf("PackConfig should hide the legacy %q alias (jsonschema:\"-\") for agent_defaults", "agents")
+	}
+}
+
 func TestCitySchemaAgentDefinition(t *testing.T) {
 	s, err := GenerateCitySchema()
 	if err != nil {
