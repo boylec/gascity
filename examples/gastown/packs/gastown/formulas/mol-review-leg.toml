@@ -40,11 +40,20 @@ gc bd show {{issue}}
 gc bd show {{issue}} --json | jq '.[0].metadata'
 ```
 
-**Expected metadata:**
+**3. Validate the assignment is non-empty:**
+The bead MUST have a non-empty description and the following metadata keys:
 - `coordinator`: who should receive the completion mail
 - `review_id`: stable run identifier for the planning session
 - `review_phase`: prd, design, prd-align-*, or plan-review-*
 - `review_leg`: the specific dimension being reviewed
+
+If the description is empty or any required metadata key is missing, do NOT
+proceed. Escalate immediately:
+```bash
+gc mail send mayor -s "BLOCKED: empty review assignment {{issue}}" \
+  -m "Bead {{issue}} has no description or is missing required review metadata. Cannot perform review."
+gc runtime drain-ack
+```
 
 The bead description is the source of truth. Follow it exactly.
 Do not invent a different scope, format, or deliverable.
