@@ -71,13 +71,16 @@ func (c *CachingStore) ApplyEvent(eventType string, payload json.RawMessage) {
 		delete(c.deletedSeq, b.ID)
 		mutated = true
 	case "bead.closed":
-		c.noteMutationLocked(b.ID)
-		if _, exists := c.beads[b.ID]; !exists {
-			c.updateStatsLocked()
-		}
-		c.beads[b.ID] = cloneBead(b)
+		// Closed beads do not belong in the active-only cache. Evict any
+		// stale entry and record the deletion seq so concurrent readers
+		// see the close. Reads for closed beads fall through to backing.
+		seq := c.noteMutationLocked(b.ID)
+		delete(c.beads, b.ID)
+		delete(c.deps, b.ID)
 		delete(c.dirty, b.ID)
-		delete(c.deletedSeq, b.ID)
+		delete(c.beadSeq, b.ID)
+		c.deletedSeq[b.ID] = seq
+		c.updateStatsLocked()
 		mutated = true
 	default:
 		return

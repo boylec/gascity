@@ -79,20 +79,26 @@ func (c *CachingStore) Close(id string) error {
 	}
 
 	c.mu.Lock()
-	c.noteMutationLocked(id)
+	seq := c.noteMutationLocked(id)
 	if b, ok := c.beads[id]; ok {
+		// Snapshot the closed bead before eviction so the post-unlock
+		// notifyChange has a payload. Closed beads don't belong in the
+		// active-only cache; reads fall through to backing.
 		b.Status = "closed"
-		c.beads[id] = b
-		delete(c.dirty, id)
-		delete(c.deletedSeq, id)
 		closed = cloneBead(b)
 		found = true
+		delete(c.beads, id)
+		delete(c.deps, id)
+		delete(c.dirty, id)
+		delete(c.beadSeq, id)
+		c.deletedSeq[id] = seq
 		c.markFreshLocked(time.Now())
 		c.updateStatsLocked()
 	} else if found {
-		c.beads[id] = cloneBead(closed)
-		delete(c.dirty, id)
-		delete(c.deletedSeq, id)
+		// Bead exists in backing but wasn't cached. The earlier
+		// backing.Get already populated `closed`. Don't add to cache
+		// just to evict — backing remains authoritative for closed beads.
+		c.deletedSeq[id] = seq
 		c.markFreshLocked(time.Now())
 		c.updateStatsLocked()
 	}
@@ -130,7 +136,7 @@ func (c *CachingStore) CloseAll(ids []string, metadata map[string]string) (int, 
 
 	notifications := make([]cacheNotification, 0, len(refreshed))
 	c.mu.Lock()
-	c.noteMutationLocked(ids...)
+	seq := c.noteMutationLocked(ids...)
 	if refreshErr != nil {
 		c.recordProblemLocked("close-all refresh", refreshErr)
 	}
@@ -139,11 +145,17 @@ func (c *CachingStore) CloseAll(ids []string, metadata map[string]string) (int, 
 	}
 	for _, item := range refreshed {
 		previous, hadPrevious := c.beads[item.id]
-		c.beads[item.id] = cloneBead(item.bead)
-		delete(c.dirty, item.id)
-		delete(c.deletedSeq, item.id)
 		if item.bead.Status == "closed" {
+			// Closed beads don't belong in the active-only cache.
+			delete(c.beads, item.id)
 			delete(c.deps, item.id)
+			delete(c.dirty, item.id)
+			delete(c.beadSeq, item.id)
+			c.deletedSeq[item.id] = seq
+		} else {
+			c.beads[item.id] = cloneBead(item.bead)
+			delete(c.dirty, item.id)
+			delete(c.deletedSeq, item.id)
 		}
 		if hadPrevious && previous.Status != "closed" && item.bead.Status == "closed" {
 			notifications = append(notifications, cacheNotification{
