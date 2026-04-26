@@ -1,6 +1,0 @@
-[order]
-description = "Nudge active polecat sessions every 3m so they pull routed work. Overnight duct tape until gc-grn / gc-o0ys (reconciler-level auto-nudge on gc.routed_to) lands."
-gate = "cooldown"
-interval = "3m"
-exec = "./packs/polecats/bin/polecat-pool-nudge.sh"
-timeout = "30s"
