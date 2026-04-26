@@ -1,0 +1,6 @@
+[order]
+description = "Nudge active+asleep polecat sessions every 3m so they pull routed work, spawn pools that have routed work but no live session, and probe hung in_progress beads. The reconciler-level auto-claim (gc-grn) doesn't aggressively wake asleep sessions when queue is non-empty, so this script keeps pools warm."
+gate = "cooldown"
+interval = "3m"
+exec = "./packs/polecats/bin/polecat-pool-nudge.sh"
+timeout = "60s"
