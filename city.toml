@@ -6,42 +6,43 @@ global_fragments = ["command-glossary", "operational-awareness"]
 [workspace.env]
 GC_TARGET_BRANCH = "boylec/develop"
 
+# ───────────────────────────────────────────────────────────────
+# Rigs
+#
+# Every rig imports the same two packs at rig scope:
+#   - gastown   (witness, refinery, polecat from the system pack)
+#   - polecats  (sonnet, opus-high, opus-max-1m tier variants)
+#
+# These imports are also declared in pack.toml as
+# [defaults.rig.imports.X], so `gc rig add` will write them into
+# city.toml automatically for any future rig. They are repeated
+# explicitly here because Gas City does not apply
+# [defaults.rig.imports] retroactively to existing rigs at
+# config-load time (see internal/config/compose.go:127 and
+# cmd/gc/cmd_rig.go:407-420). When adding a new rig with
+# `gc rig add`, do NOT also add these blocks by hand — the
+# command will write them for you.
+# ───────────────────────────────────────────────────────────────
+
 [[rigs]]
 name = "enterprise"
 prefix = "sc"
 default_sling_target = "enterprise/polecat"
 dolt_host = "127.0.0.1"
 dolt_port = "58414"
-[rigs.imports]
 [rigs.imports.gastown]
 source = "./.gc/system/packs/gastown"
 [rigs.imports.polecats]
 source = "./packs/polecats"
-
-[[rigs.overrides]]
-agent = "polecat"
-max_active_sessions = 3
-min_active_sessions = 1
-
-[[rigs.overrides]]
-agent = "refinery"
-max_active_sessions = 3
-min_active_sessions = 1
 
 [[rigs]]
 name = "gascity"
 prefix = "gc"
 default_sling_target = "gascity/polecat"
-[rigs.imports]
 [rigs.imports.gastown]
 source = "./.gc/system/packs/gastown"
 [rigs.imports.polecats]
 source = "./packs/polecats"
-
-[[rigs.overrides]]
-agent = "polecat"
-max_active_sessions = 3
-min_active_sessions = 1
 
 [[rigs]]
 name = "designsystem"
@@ -50,6 +51,10 @@ suspended = true
 default_sling_target = "designsystem/polecat"
 dolt_host = "127.0.0.1"
 dolt_port = "53930"
+[rigs.imports.gastown]
+source = "./.gc/system/packs/gastown"
+[rigs.imports.polecats]
+source = "./packs/polecats"
 
 [session]
 startup_timeout = "180s"

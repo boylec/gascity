@@ -1,12 +1,20 @@
-# SafetyChain polecat variant pool — imported per-rig so that the
-# three implementation polecats (sonnet / opus-high / opus-max-1m)
-# are rig-scoped with proper worktrees and can see the rig's bead store.
+# SafetyChain polecat variant pool — imported per-rig so the three implementation
+# polecats (sonnet / opus-high / opus-max-1m) are rig-scoped with proper worktrees
+# and can see the rig's bead store.
 #
-# Invocation / routing targets:
+# Routing targets (set by mol-sc-sling-convoy from metadata.agent_tier):
 #   <rig>/polecats.sonnet       — default mechanical implementation
 #   <rig>/polecats.opus-high    — architecture / cross-cutting / security-sensitive
 #   <rig>/polecats.opus-max-1m  — jobs needing 1M context
+#
+# Provider presets are defined in <city>/pack.toml. Each per-tier agent.toml
+# below selects a provider; everything else (scope, worktree setup, prompt,
+# namepool, env) is set per-agent because [agent_defaults] only supports a
+# narrow whitelist (model, wake_mode, default_sling_formula, allow_overlay,
+# allow_env_override, append_fragments) — see internal/config/config.go
+# AgentDefaults struct.
 
 [pack]
 name = "polecats"
 schema = 2
+version = "0.1.0"

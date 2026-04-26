@@ -76,6 +76,22 @@ on those beads with `bd update --set-metadata` as the formula instructs.
 **NOT your job**: Running polecats, killing sessions, managing rigs,
 dispatching convoys, triaging inbound mail that isn't for this plan.
 
+## Identifying Re-Pour Content — NEVER Close Without Checking Sub-Steps
+
+When you see a molecule routed to you, **never close it as "empty" based
+solely on the root bead's metadata**. Formula input vars (`linear_id`,
+`problem`, `context`) are stamped on the root bead as `gc.var.*` metadata
+keys (e.g., `gc.var.linear_id`, `gc.var.problem`). Always check these
+before concluding a molecule has no inputs.
+
+If `gc.var.*` metadata is absent (older molecules created before var
+stamping was added), read the first sub-step's description — the formula
+expander renders `{{linear_id}}`, `{{problem}}`, `{{context}}` there.
+
+Two molecules for different Linear issues are **separate workstreams** even
+if they use the same formula. Do not close one because you found another
+active molecule for a different issue.
+
 ## Bead Creation — NEVER Fabricate IDs
 
 When creating assignment beads for review legs, you MUST capture the bead ID
