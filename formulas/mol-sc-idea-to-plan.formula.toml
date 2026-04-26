@@ -561,21 +561,25 @@ description = '''
 Fan out parallel PRD review using review task beads plus `mol-review-leg`.
 
 **Dispatch pattern for EVERY review leg in this workflow:**
-1. Create the assignment bead and CAPTURE its ID from command output:
+1. Create the assignment bead **in the implementing rig** and CAPTURE its
+   ID from command output. The `--rig "{{target_rig}}"` flag is critical —
+   without it, beads land in HQ where the QM session runs, and the
+   rig-scoped polecat pool can't see them (cross-rig pool routing is
+   blocked). Same root cause as the create-beads fix in 19da6ee:
 ```bash
-LEG_BEAD=$(gc bd create --title "<leg title>" --description "<prompt>" \
-  --type task --priority 2 --json | jq -r .id)
+LEG_BEAD=$(gc bd --rig "{{target_rig}}" create --title "<leg title>" \
+  --description "<prompt>" --type task --priority 2 --json | jq -r .id)
 echo "Created bead: $LEG_BEAD"
 ```
 2. VERIFY the bead exists (guards against fabricated IDs):
 ```bash
-bd show "$LEG_BEAD"
+bd --rig "{{target_rig}}" show "$LEG_BEAD"
 ```
 3. Set metadata on the verified bead. **Stamp `gc.routed_to` here** — do
    NOT rely on the sling step to do it. If the sling later fails, the bead
    still lands in the pool and a polecat picks it up:
 ```bash
-bd update "$LEG_BEAD" \
+bd --rig "{{target_rig}}" update "$LEG_BEAD" \
   --set-metadata coordinator="$COORDINATOR" \
   --set-metadata review_id="$REVIEW_ID" \
   --set-metadata review_phase=<phase> \
