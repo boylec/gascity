@@ -1386,6 +1386,164 @@ func TestEffectiveWorkQueryPoolNoPoolName(t *testing.T) {
 	}
 }
 
+func TestUnboundQualifiedName(t *testing.T) {
+	tests := []struct {
+		name  string
+		agent Agent
+		want  string
+	}{
+		{
+			name:  "V1 no binding",
+			agent: Agent{Name: "polecat", Dir: "enterprise"},
+			want:  "enterprise/polecat",
+		},
+		{
+			name:  "V2 with binding",
+			agent: Agent{Name: "polecat", Dir: "enterprise", BindingName: "gastown"},
+			want:  "enterprise/polecat",
+		},
+		{
+			name:  "no dir no binding",
+			agent: Agent{Name: "mayor"},
+			want:  "mayor",
+		},
+		{
+			name:  "no dir with binding",
+			agent: Agent{Name: "mayor", BindingName: "gastown"},
+			want:  "mayor",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.agent.UnboundQualifiedName()
+			if got != tt.want {
+				t.Errorf("UnboundQualifiedName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnbindQualifiedName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"enterprise/gastown.polecat", "enterprise/polecat"},
+		{"enterprise/polecats.opus-high", "enterprise/opus-high"},
+		{"enterprise/polecat", "enterprise/polecat"},
+		{"gastown.mayor", "mayor"},
+		{"mayor", "mayor"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := unbindQualifiedName(tt.input)
+			if got != tt.want {
+				t.Errorf("unbindQualifiedName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEffectiveWorkQueryV2UnboundShortForm(t *testing.T) {
+	a := Agent{
+		Name:        "polecat-1",
+		Dir:         "enterprise",
+		BindingName: "gastown",
+		PoolName:    "enterprise/gastown.polecat",
+	}
+	got := a.EffectiveWorkQuery()
+	if !strings.Contains(got, "gc.routed_to=enterprise/gastown.polecat") {
+		t.Errorf("missing canonical target: %q", got)
+	}
+	if !strings.Contains(got, "gc.routed_to=enterprise/polecat") {
+		t.Errorf("missing unbound short form: %q", got)
+	}
+}
+
+func TestEffectiveWorkQueryPoolAliases(t *testing.T) {
+	a := Agent{
+		Name:        "opus-high",
+		Dir:         "enterprise",
+		BindingName: "polecats",
+		PoolAliases: []string{"enterprise/polecat"},
+	}
+	got := a.EffectiveWorkQuery()
+	if !strings.Contains(got, "gc.routed_to=enterprise/polecats.opus-high") {
+		t.Errorf("missing canonical target: %q", got)
+	}
+	if !strings.Contains(got, "gc.routed_to=enterprise/polecat") {
+		t.Errorf("missing pool alias: %q", got)
+	}
+	if !strings.Contains(got, "gc.routed_to=enterprise/opus-high") {
+		t.Errorf("missing unbound short form: %q", got)
+	}
+	// Tier 4 molecule queries should also include aliases.
+	if !strings.Contains(got, "bd list --metadata-field gc.routed_to=enterprise/polecat --status=open --type=molecule") {
+		t.Errorf("missing tier 4 molecule route for pool alias: %q", got)
+	}
+}
+
+func TestEffectiveWorkQueryPoolAliasesWithPoolName(t *testing.T) {
+	a := Agent{
+		Name:        "furiosa",
+		Dir:         "enterprise",
+		BindingName: "gastown",
+		PoolName:    "enterprise/gastown.polecat",
+		PoolAliases: []string{"enterprise/polecats.opus-high"},
+	}
+	got := a.EffectiveWorkQuery()
+	if !strings.Contains(got, "gc.routed_to=enterprise/gastown.polecat") {
+		t.Errorf("missing canonical target (PoolName): %q", got)
+	}
+	if !strings.Contains(got, "gc.routed_to=enterprise/polecats.opus-high") {
+		t.Errorf("missing tier pool alias: %q", got)
+	}
+	if !strings.Contains(got, "gc.routed_to=enterprise/polecat") {
+		t.Errorf("missing unbound short form: %q", got)
+	}
+}
+
+func TestEffectiveWorkQueryNoAliasesV1(t *testing.T) {
+	a := Agent{Name: "polecat", Dir: "hello-world"}
+	got := a.EffectiveWorkQuery()
+	if !strings.Contains(got, "gc.routed_to=hello-world/polecat") {
+		t.Errorf("missing canonical target: %q", got)
+	}
+	count := strings.Count(got, "gc.routed_to=")
+	if count != 2 {
+		t.Errorf("V1 agent should have exactly 2 routing checks (tier3 + tier4), got %d in: %q", count, got)
+	}
+}
+
+func TestEffectiveScaleCheckPoolAliases(t *testing.T) {
+	a := Agent{
+		Name:        "opus-high",
+		Dir:         "enterprise",
+		BindingName: "polecats",
+		PoolAliases: []string{"enterprise/polecat"},
+	}
+	got := a.EffectiveScaleCheck()
+	if !strings.Contains(got, "gc.routed_to=enterprise/polecats.opus-high") {
+		t.Errorf("missing canonical key in scale check: %q", got)
+	}
+	if !strings.Contains(got, "gc.routed_to=enterprise/polecat") {
+		t.Errorf("missing pool alias in scale check: %q", got)
+	}
+	if !strings.Contains(got, "gc.routed_to=enterprise/opus-high") {
+		t.Errorf("missing unbound short form in scale check: %q", got)
+	}
+}
+
+func TestAgentMatchesIdentityV2UnboundDirQualified(t *testing.T) {
+	a := Agent{Name: "polecat", BindingName: "gastown", Dir: "enterprise"}
+	if !AgentMatchesIdentity(&a, "enterprise/polecat") {
+		t.Error("V2 agent should match dir-qualified short form enterprise/polecat")
+	}
+	if AgentMatchesIdentity(&a, "polecat") {
+		t.Error("V2 agent should NOT match bare name without dir prefix")
+	}
+}
+
 func TestEffectiveWorkQueryControlDispatcherIncludesLegacyWorkflowControlRoute(t *testing.T) {
 	a := Agent{Name: ControlDispatcherAgentName, Dir: "gascity"}
 	got := a.EffectiveWorkQuery()
@@ -1474,8 +1632,8 @@ func TestDefaultPoolCheckUsesPoolName(t *testing.T) {
 		PoolName: "hello-world/dog",
 	}
 	check := a.EffectiveScaleCheck()
-	if !strings.Contains(check, "gc.routed_to=hello-world/dog-1") {
-		t.Errorf("EffectiveScaleCheck() = %q, want gc.routed_to=hello-world/dog-1", check)
+	if !strings.Contains(check, "gc.routed_to=hello-world/dog") {
+		t.Errorf("EffectiveScaleCheck() = %q, want gc.routed_to=hello-world/dog (pool template name)", check)
 	}
 }
 

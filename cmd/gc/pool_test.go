@@ -681,6 +681,7 @@ func TestDeepCopyAgentCoversAllFields(t *testing.T) {
 		Namepool:                     "names.txt",
 		NamepoolNames:                []string{"alpha", "bravo"},
 		OptionDefaults:               map[string]string{"effort": "max"},
+		PoolAliases:                  []string{"enterprise/polecat"},
 		BindingName:                  "gastown",
 		PackName:                     "gastown",
 	}

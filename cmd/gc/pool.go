@@ -272,6 +272,10 @@ func deepCopyAgent(src *config.Agent, name, dir string) config.Agent {
 		dst.Args = make([]string, len(src.Args))
 		copy(dst.Args, src.Args)
 	}
+	if len(src.PoolAliases) > 0 {
+		dst.PoolAliases = make([]string, len(src.PoolAliases))
+		copy(dst.PoolAliases, src.PoolAliases)
+	}
 	if len(src.ProcessNames) > 0 {
 		dst.ProcessNames = make([]string, len(src.ProcessNames))
 		copy(dst.ProcessNames, src.ProcessNames)
