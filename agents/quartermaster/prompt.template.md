@@ -86,7 +86,7 @@ before concluding a molecule has no inputs.
 
 If `gc.var.*` metadata is absent (older molecules created before var
 stamping was added), read the first sub-step's description — the formula
-expander renders `{{linear_id}}`, `{{problem}}`, `{{context}}` there.
+expander renders `{linear_id}`, `{problem}`, `{context}` there.
 
 Two molecules for different Linear issues are **separate workstreams** even
 if they use the same formula. Do not close one because you found another
