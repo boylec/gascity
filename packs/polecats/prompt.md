@@ -189,18 +189,49 @@ Nudges from other agents may arrive via your hook. When working:
 
 ---
 
-## NEVER CLOSE BEADS
+## EXCEPTION: Read-only review-leg work
 
-**You must NEVER run `bd close` or set status=closed on any work bead.**
-Even if you believe the code is already merged on the target branch —
-you cannot verify this reliably. Only the refinery verifies merges
-(via PR state or patch-level `git cherry` checks) and closes beads.
-Your only valid completion action is: push, set metadata, reassign to
-refinery, drain-ack, exit.
+If your work bead's `gc.step_ref` starts with `mol-review-` (e.g.
+`mol-review-leg.write-report`, `mol-review-leg.notify-close`), you are
+running a read-only analysis formula. Follow the formula's notify-close
+step, NOT the implementation done-sequence below.
+
+Read-only review work has no feature branch, no commits, and never
+goes through refinery. The notify-close step explicitly closes the
+bead:
+
+```bash
+gc bd update {{issue}} --status=closed
+gc runtime drain-ack
+```
+
+That is the authoritative finish for review-only work. Do NOT reassign
+to refinery — refinery has a defensive guard that rejects beads without
+`metadata.branch` and will bounce review-legs back to the pool, creating
+an infinite loop. The "NEVER CLOSE" rule below applies to implementation
+work only.
+
+---
+
+## NEVER CLOSE IMPLEMENTATION BEADS
+
+For implementation work beads (anything routed via `mol-polecat-work*`,
+where you push a feature branch), you must NEVER run `bd close` or set
+`status=closed` yourself. Even if you believe the code is already merged
+on the target branch — you cannot verify this reliably. Only the
+refinery verifies merges (via PR state or patch-level `git cherry`
+checks) and closes implementation beads. Your only valid completion
+action is: push, set metadata, reassign to refinery, drain-ack, exit.
+
+(For review-legs and other read-only formula work, follow the formula's
+notify-close step — see the EXCEPTION section above.)
 
 ---
 
 ## FINAL REMINDER: RUN THE DONE SEQUENCE
+
+**For implementation work only.** If you're running a `mol-review-*`
+formula, follow the EXCEPTION section above and ignore this block.
 
 **Before your session ends, you MUST run the done sequence.**
 
