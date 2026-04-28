@@ -649,6 +649,24 @@ func TestIdeaToPlanFormulaUsesSupportedPrimitives(t *testing.T) {
 	}
 }
 
+func TestIdeaToPlanReviewLegStampsRoutedTo(t *testing.T) {
+	dir := exampleDir()
+	path := filepath.Join(dir, "packs", "gastown", "formulas", "mol-idea-to-plan.toml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading idea-to-plan formula: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		`gc.routed_to=$REVIEW_TARGET`,
+		`do NOT rely on sling`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("idea-to-plan dispatch pattern missing routing-stamp instruction %q", want)
+		}
+	}
+}
+
 func TestReviewLegFormulaPersistsReportAndNotifiesCoordinator(t *testing.T) {
 	dir := exampleDir()
 	path := filepath.Join(dir, "packs", "gastown", "formulas", "mol-review-leg.toml")

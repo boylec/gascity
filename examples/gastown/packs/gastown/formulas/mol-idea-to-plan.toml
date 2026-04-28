@@ -143,11 +143,12 @@ Fan out parallel PRD review using review task beads plus `mol-review-leg`.
 
 **Dispatch pattern for EVERY review leg in this workflow:**
 1. `gc bd create` a task bead with a detailed description
-2. set metadata:
+2. set metadata — stamp `gc.routed_to=$REVIEW_TARGET` here, do NOT rely on sling:
    - `coordinator=$COORDINATOR`
    - `review_id=$REVIEW_ID`
    - `review_phase=<phase>`
    - `review_leg=<leg>`
+   - `gc.routed_to=$REVIEW_TARGET` — stamp routing at create time so the bead lands in the right pool even if sling fails
 3. sling it to `$REVIEW_TARGET` with:
 ```bash
 gc sling "$REVIEW_TARGET" "$LEG_BEAD" --on {{review_formula}}
