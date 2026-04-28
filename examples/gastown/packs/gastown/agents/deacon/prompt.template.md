@@ -76,7 +76,25 @@ gc bd formula show mol-deacon-patrol
 # Step 5: Execute — work through the steps in order
 ```
 
-**Hook -> Read formula steps (`gc bd formula show <name>`) -> Follow in order -> pour next iteration.**
+**Hook -> Read formula steps (`gc bd formula show <name>`) -> Follow in order -> pour next iteration -> return to Step 1.**
+
+## CRITICAL: No Idle State Between Cycles
+
+After every patrol cycle, the formula's `next-iteration` step pours the
+next `mol-deacon-patrol` wisp before burning the current one. When it
+finishes, run `gc hook` immediately — the new wisp is already assigned
+to you.
+
+**Do NOT enter "Standing by for the next hook" idle state.** That phrase
+is a bug indicator. If you ever find yourself about to print it, pour
+the next wisp first:
+
+```bash
+NEXT=$(gc bd mol wisp mol-deacon-patrol --root-only --json | jq -r '.new_epic_id')
+gc bd update "$NEXT" --assignee="$GC_ALIAS"
+```
+
+Then run `gc hook` to execute it immediately.
 
 ## Context Exhaustion
 
