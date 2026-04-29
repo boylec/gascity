@@ -17,6 +17,7 @@ import (
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/formula"
 	"github.com/gastownhall/gascity/internal/fsys"
+	"github.com/gastownhall/gascity/internal/orders"
 )
 
 func exampleDir() string {
@@ -770,6 +771,22 @@ func TestReviewLegFormulaPersistsReportAndNotifiesCoordinator(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("review-leg formula missing %q", want)
 		}
+	}
+}
+
+func TestDigestGenerateOrderUsesQualifiedPool(t *testing.T) {
+	dir := exampleDir()
+	path := filepath.Join(dir, "packs", "gastown", "orders", "digest-generate.toml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading digest-generate order: %v", err)
+	}
+	order, err := orders.Parse(data)
+	if err != nil {
+		t.Fatalf("parsing digest-generate order: %v", err)
+	}
+	if !strings.Contains(order.Pool, "/") {
+		t.Errorf("digest-generate order pool = %q, want fully-qualified name containing /", order.Pool)
 	}
 }
 
