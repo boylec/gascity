@@ -652,15 +652,21 @@ func TestControllerReloadsConventionDiscoveredAgentOnWatchEvent(t *testing.T) {
 		t.Fatalf("revision did not change after convention-discovered agent was added: %s", result.Revision)
 	}
 
-	var names []string
+	found := false
 	for _, a := range result.Cfg.Agents {
-		if a.Implicit {
-			continue
+		if !a.Implicit && a.Name == "noreen" {
+			found = true
+			break
 		}
-		names = append(names, a.Name)
 	}
-	if len(names) != 1 || names[0] != "noreen" {
-		t.Fatalf("reloaded agent names = %v, want [noreen]", names)
+	if !found {
+		var names []string
+		for _, a := range result.Cfg.Agents {
+			if !a.Implicit {
+				names = append(names, a.Name)
+			}
+		}
+		t.Fatalf("reloaded agents = %v, want noreen among them", names)
 	}
 }
 
@@ -1607,4 +1613,53 @@ func (osFS) Lstat(name string) (os.FileInfo, error)               { return os.Ls
 func (osFS) ReadDir(name string) ([]os.DirEntry, error)           { return os.ReadDir(name) }
 func (osFS) Rename(oldpath, newpath string) error                 { return os.Rename(oldpath, newpath) }
 func (osFS) Remove(name string) error                             { return os.Remove(name) }
-func (osFS) Chmod(name string, mode os.FileMode) error            { return os.Chmod(name, mode) }
+
+// TestTryReloadConfig_IncludesBuiltinPackOrders verifies that the controller's
+// config reload path includes builtin pack formula layers so the order
+// dispatcher sees orders from all embedded packs (core, maintenance, bd, dolt).
+// Regression test for gc-4624: dolt pack orders never fired because
+// tryReloadConfig did not pass builtinPackIncludes to LoadWithIncludes.
+func TestTryReloadConfig_IncludesBuiltinPackOrders(t *testing.T) {
+	configureTestDoltIdentityEnv(t)
+	t.Setenv("GC_BEADS", "")
+
+	dir := shortSocketTempDir(t, "gc-reload-orders-")
+	tomlPath := filepath.Join(dir, "city.toml")
+	if err := os.WriteFile(tomlPath, []byte("[workspace]\nname = \"test\"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(city.toml): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pack.toml"), []byte("[pack]\nname = \"test\"\nschema = 1\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(pack.toml): %v", err)
+	}
+
+	result, err := tryReloadConfig(tomlPath, "test", dir)
+	if err != nil {
+		t.Fatalf("tryReloadConfig() error = %v", err)
+	}
+
+	var stderr bytes.Buffer
+	aa, err := scanAllOrders(dir, result.Cfg, &stderr, "test")
+	if err != nil {
+		t.Fatalf("scanAllOrders: %v", err)
+	}
+
+	names := make(map[string]bool, len(aa))
+	for _, a := range aa {
+		names[a.Name] = true
+	}
+
+	// Maintenance pack orders (always included).
+	for _, want := range []string{"gate-sweep", "wisp-compact"} {
+		if !names[want] {
+			t.Errorf("missing maintenance order %q; got %v", want, names)
+		}
+	}
+	// Dolt pack orders (included transitively via bd pack).
+	for _, want := range []string{"dolt-health", "dolt-gc-nudge", "dolt-remotes-patrol"} {
+		if !names[want] {
+			t.Errorf("missing dolt order %q; got %v", want, names)
+		}
+	}
+}
+
+func (osFS) Chmod(name string, mode os.FileMode) error { return os.Chmod(name, mode) }
