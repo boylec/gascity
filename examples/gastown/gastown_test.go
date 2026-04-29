@@ -133,6 +133,57 @@ func TestRefineryPromptSeedsTargetBranchVar(t *testing.T) {
 	}
 }
 
+func TestPolecatFormulaSubmitNeverClosesBead(t *testing.T) {
+	dir := exampleDir()
+	path := filepath.Join(dir, "packs", "gastown", "formulas", "mol-polecat-work.toml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading polecat formula: %v", err)
+	}
+	body := string(data)
+
+	// The formula must carry an explicit prohibition — not just absent close
+	// commands. An LLM reading the formula must see a clear rule, not infer
+	// it from silence.
+	for _, want := range []string{
+		`NEVER CLOSE`,
+		`gc bd close`,
+		`status=closed`,
+		`refinery closes`,
+	} {
+		// First two: must be present as explicit prohibition text.
+		// Last two: only the absence check matters — handled below.
+		_ = want
+	}
+	if !strings.Contains(body, "NEVER CLOSE") {
+		t.Errorf("polecat formula missing explicit NEVER CLOSE prohibition")
+	}
+	if !strings.Contains(body, "refinery closes") {
+		t.Errorf("polecat formula missing statement that refinery closes the bead")
+	}
+
+	// Submit-and-exit must not contain any close commands.
+	submitIdx := strings.Index(body, `id = "submit-and-exit"`)
+	if submitIdx == -1 {
+		t.Fatal("submit-and-exit step not found in formula")
+	}
+	submitSection := body[submitIdx:]
+	if strings.Contains(submitSection, "gc bd close") {
+		t.Errorf("submit-and-exit step must not contain 'gc bd close'")
+	}
+	if strings.Contains(submitSection, "--status=closed") {
+		t.Errorf("submit-and-exit step must not contain '--status=closed'")
+	}
+
+	// Submit-and-exit must hand off to the refinery, not close.
+	if !strings.Contains(submitSection, "--status=open") {
+		t.Errorf("submit-and-exit step must reassign bead with --status=open (refinery handoff)")
+	}
+	if !strings.Contains(submitSection, "refinery") {
+		t.Errorf("submit-and-exit step must mention refinery as the next assignee")
+	}
+}
+
 func TestRefineryFormulaSupportsMergeStrategies(t *testing.T) {
 	dir := exampleDir()
 	path := filepath.Join(dir, "packs", "gastown", "formulas", "mol-refinery-patrol.toml")

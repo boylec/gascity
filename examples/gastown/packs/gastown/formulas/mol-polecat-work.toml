@@ -23,6 +23,17 @@ be inherited from a parent convoy with `metadata.target` set.
 `metadata.rejection_reason`, a previous attempt was rejected by the
 refinery. Resume the existing branch — don't redo all the work.
 
+## NEVER CLOSE
+
+**Polecats must NEVER run `gc bd close` or set `--status=closed`
+on any implementation bead.** The refinery is the sole authority for
+closing work beads — it verifies the merge landed via `git cherry` or
+PR state before closing. Closing early bypasses that gate and falsely
+marks in-flight work as done.
+
+Your only valid completion action: push → set metadata → reassign to
+refinery → drain-ack → exit. The refinery closes the bead; you do not.
+
 ## Failure Modes
 
 | Situation | Action |
