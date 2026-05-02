@@ -423,6 +423,24 @@ func finalize(opts SlingOpts, deps SlingDeps, beadID, method string, result Slin
 	return result, nil
 }
 
+// routeWorkflowRoot sets gc.routed_to on a graph workflow root so pool hooks
+// can discover it. Without this, the root sits in_progress with no assignee
+// and no gc.routed_to — invisible to the pool hook query.
+func routeWorkflowRoot(rootID string, a config.Agent, deps SlingDeps) error {
+	if deps.Router != nil {
+		return deps.Router.Route(context.Background(), RouteRequest{
+			BeadID:  rootID,
+			Target:  a.QualifiedName(),
+			WorkDir: SlingDirForBead(deps.Cfg, deps.CityPath, rootID),
+			Env:     ResolveSlingEnv(a, deps),
+		})
+	}
+	if deps.Store != nil {
+		return deps.Store.SetMetadata(rootID, "gc.routed_to", a.QualifiedName())
+	}
+	return nil
+}
+
 // doStartGraphWorkflow performs post-instantiation graph workflow setup.
 func doStartGraphWorkflow(rootID, sourceBeadID string, a config.Agent, method string, deps SlingDeps) (SlingResult, error) {
 	var result SlingResult
@@ -435,6 +453,9 @@ func doStartGraphWorkflow(rootID, sourceBeadID string, a config.Agent, method st
 
 	if err := PromoteWorkflowLaunchBead(deps.Store, rootID); err != nil {
 		return result, fmt.Errorf("setting workflow root %s in_progress: %w", rootID, err)
+	}
+	if err := routeWorkflowRoot(rootID, a, deps); err != nil {
+		return result, fmt.Errorf("routing workflow root %s to %s: %w", rootID, a.QualifiedName(), err)
 	}
 	if sourceBeadID != "" {
 		if err := deps.Store.SetMetadata(rootID, "gc.source_bead_id", sourceBeadID); err != nil {

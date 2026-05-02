@@ -3135,6 +3135,63 @@ title = "Do work"
 	}
 }
 
+func TestGraphWorkflowRootGetsRoutedTo(t *testing.T) {
+	runner := newFakeRunner()
+	sp := runtime.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	cfg.Daemon.FormulaV2 = true
+	applyFeatureFlags(cfg)
+	t.Cleanup(func() { applyFeatureFlags(&config.City{}) })
+	cfg.FormulaLayers.City = []string{testFormulaDir(t)}
+	a := config.Agent{Name: "mayor", MaxActiveSessions: intPtr(1)}
+
+	graphFormula := `
+formula = "graph-route-test"
+version = 2
+contract = "graph.v2"
+
+[[steps]]
+id = "step"
+title = "Do work"
+`
+	if err := os.WriteFile(filepath.Join(cfg.FormulaLayers.City[0], "graph-route-test.formula.toml"), []byte(graphFormula), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	deps, stdout, stderr := testDeps(cfg, sp, runner.run)
+	deps.Store = beads.NewMemStoreFrom(1, []beads.Bead{
+		{ID: "BL-99", Title: "Work", Type: "task", Status: "open"},
+	}, nil)
+	config.InjectImplicitAgents(cfg)
+	opts := testOpts(a, "BL-99")
+	opts.OnFormula = "graph-route-test"
+	code := doSling(opts, deps, nil, stdout, stderr)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	parent, err := deps.Store.Get("BL-99")
+	if err != nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	rootID := parent.Metadata["workflow_id"]
+	if rootID == "" {
+		t.Fatal("parent workflow_id missing")
+	}
+
+	root, err := deps.Store.Get(rootID)
+	if err != nil {
+		t.Fatalf("get workflow root: %v", err)
+	}
+	if got := root.Status; got != "in_progress" {
+		t.Fatalf("root status = %q, want in_progress", got)
+	}
+	if got := root.Metadata["gc.routed_to"]; got != "mayor" {
+		t.Fatalf("root gc.routed_to = %q, want mayor — workflow root must have gc.routed_to set so pool hooks can discover it (gc-6smo)", got)
+	}
+}
+
 func TestDoSlingGraphWorkflowConflictReturnsExit3(t *testing.T) {
 	runner := newFakeRunner()
 	sp := runtime.NewFake()
