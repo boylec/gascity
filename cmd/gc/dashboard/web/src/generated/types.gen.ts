@@ -2894,6 +2894,8 @@ export type TypedEventStreamEnvelope = ({
 } & TypedEventStreamEnvelopeSessionQuarantined) | ({
     type: 'session.stopped';
 } & TypedEventStreamEnvelopeSessionStopped) | ({
+    type: 'session.stranded';
+} & TypedEventStreamEnvelopeSessionStranded) | ({
     type: 'session.suspended';
 } & TypedEventStreamEnvelopeSessionSuspended) | ({
     type: 'session.undrained';
@@ -3482,6 +3484,20 @@ export type TypedEventStreamEnvelopeSessionStopped = {
 };
 
 /**
+ * TypedEventStreamEnvelope session.stranded
+ */
+export type TypedEventStreamEnvelopeSessionStranded = {
+    actor: string;
+    message?: string;
+    payload: NoPayload;
+    seq: number;
+    subject?: string;
+    ts: string;
+    type: 'session.stranded';
+    workflow?: WorkflowEventProjection;
+};
+
+/**
  * TypedEventStreamEnvelope session.suspended
  */
 export type TypedEventStreamEnvelopeSessionSuspended = {
@@ -3637,6 +3653,8 @@ export type TypedTaggedEventStreamEnvelope = ({
 } & TypedTaggedEventStreamEnvelopeSessionQuarantined) | ({
     type: 'session.stopped';
 } & TypedTaggedEventStreamEnvelopeSessionStopped) | ({
+    type: 'session.stranded';
+} & TypedTaggedEventStreamEnvelopeSessionStranded) | ({
     type: 'session.suspended';
 } & TypedTaggedEventStreamEnvelopeSessionSuspended) | ({
     type: 'session.undrained';
@@ -4262,6 +4280,21 @@ export type TypedTaggedEventStreamEnvelopeSessionStopped = {
     subject?: string;
     ts: string;
     type: 'session.stopped';
+    workflow?: WorkflowEventProjection;
+};
+
+/**
+ * TypedTaggedEventStreamEnvelope session.stranded
+ */
+export type TypedTaggedEventStreamEnvelopeSessionStranded = {
+    actor: string;
+    city: string;
+    message?: string;
+    payload: NoPayload;
+    seq: number;
+    subject?: string;
+    ts: string;
+    type: 'session.stranded';
     workflow?: WorkflowEventProjection;
 };
 
