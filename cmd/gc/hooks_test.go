@@ -10,6 +10,148 @@ import (
 	"time"
 )
 
+func TestHookScriptsContainStamp(t *testing.T) {
+	oldDate, oldCommit := date, commit
+	t.Cleanup(func() { date, commit = oldDate, oldCommit })
+
+	date = "2026-04-29T10:00:00Z"
+	commit = "abc1234"
+
+	for name, eventType := range beadHooks {
+		t.Run(name, func(t *testing.T) {
+			var content string
+			if name == "on_close" {
+				content = closeHookScript()
+			} else {
+				content = hookScript(eventType)
+			}
+			if !strings.Contains(content, "# gc-hook-stamp: 2026-04-29T10:00:00Z abc1234") {
+				t.Errorf("hook %s missing stamp line:\n%s", name, content)
+			}
+		})
+	}
+}
+
+func TestParseHookStampDate(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"with stamp", "#!/bin/sh\n# gc-hook-stamp: 2026-04-29T10:00:00Z abc1234\n", "2026-04-29T10:00:00Z"},
+		{"no stamp", "#!/bin/sh\n# Installed by gc\n", ""},
+		{"empty", "", ""},
+		{"unknown date", "#!/bin/sh\n# gc-hook-stamp: unknown unknown\n", "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseHookStampDate([]byte(tt.content))
+			if got != tt.want {
+				t.Errorf("parseHookStampDate() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInstallBeadHooksForwardOnly(t *testing.T) {
+	oldDate, oldCommit := date, commit
+	t.Cleanup(func() { date, commit = oldDate, oldCommit })
+
+	dir := t.TempDir()
+
+	// Install with a "newer" binary.
+	date = "2026-06-01T00:00:00Z"
+	commit = "new1111"
+	if err := installBeadHooks(dir); err != nil {
+		t.Fatalf("newer install: %v", err)
+	}
+
+	path := filepath.Join(dir, ".beads", "hooks", "on_create")
+	newerContent, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(newerContent), "2026-06-01") {
+		t.Fatalf("newer hook missing expected stamp")
+	}
+
+	// Now run with an "older" binary — should NOT overwrite.
+	date = "2025-01-01T00:00:00Z"
+	commit = "old2222"
+	if err := installBeadHooks(dir); err != nil {
+		t.Fatalf("older install: %v", err)
+	}
+
+	afterContent, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !bytes.Equal(newerContent, afterContent) {
+		t.Errorf("stale binary overwrote newer hook.\nwant stamp from 2026-06-01, got:\n%s", afterContent)
+	}
+}
+
+func TestInstallBeadHooksUpgradesLegacyHooks(t *testing.T) {
+	oldDate, oldCommit := date, commit
+	t.Cleanup(func() { date, commit = oldDate, oldCommit })
+
+	dir := t.TempDir()
+	hooksDir := filepath.Join(dir, ".beads", "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a legacy hook (no stamp).
+	legacy := "#!/bin/sh\n# Installed by gc — old version\necho old\n"
+	if err := os.WriteFile(filepath.Join(hooksDir, "on_create"), []byte(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	date = "2026-01-01T00:00:00Z"
+	commit = "aaa1111"
+	if err := installBeadHooks(dir); err != nil {
+		t.Fatalf("installBeadHooks: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(hooksDir, "on_create"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "gc-hook-stamp") {
+		t.Errorf("legacy hook was not upgraded to stamped version:\n%s", data)
+	}
+}
+
+func TestInstallBeadHooksDevBuildAlwaysWrites(t *testing.T) {
+	oldDate, oldCommit := date, commit
+	t.Cleanup(func() { date, commit = oldDate, oldCommit })
+
+	dir := t.TempDir()
+
+	// Install with a stamped binary.
+	date = "2099-01-01T00:00:00Z"
+	commit = "future1"
+	if err := installBeadHooks(dir); err != nil {
+		t.Fatalf("stamped install: %v", err)
+	}
+
+	// Dev build (unknown date) should still overwrite — dev builds always win.
+	date = "unknown"
+	commit = "unknown"
+	if err := installBeadHooks(dir); err != nil {
+		t.Fatalf("dev install: %v", err)
+	}
+
+	path := filepath.Join(dir, ".beads", "hooks", "on_create")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "gc-hook-stamp: unknown unknown") {
+		t.Errorf("dev build did not overwrite stamped hook:\n%s", data)
+	}
+}
+
 func TestInstallBeadHooksCreatesScripts(t *testing.T) {
 	dir := t.TempDir()
 	if err := installBeadHooks(dir); err != nil {
