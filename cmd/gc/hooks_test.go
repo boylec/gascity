@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -69,6 +70,17 @@ func TestInstallBeadHooksCreatesScripts(t *testing.T) {
 			}
 			if !strings.Contains(content, `) </dev/null >/dev/null 2>&1 &`) {
 				t.Errorf("hook %s missing detached background redirect:\n%s", tc.filename, content)
+			}
+			// Failure diagnostics: stderr captured to a log file, and
+			// non-zero exit produces a dated diagnostic line.
+			if !strings.Contains(content, `HOOK_LOG="${BEADS_DIR:-.beads}/hooks.log"`) {
+				t.Errorf("hook %s missing HOOK_LOG definition:\n%s", tc.filename, content)
+			}
+			if !strings.Contains(content, `2>>"$HOOK_LOG"`) {
+				t.Errorf("hook %s does not capture gc stderr to HOOK_LOG:\n%s", tc.filename, content)
+			}
+			if !strings.Contains(content, `>>"$HOOK_LOG" 2>/dev/null`) {
+				t.Errorf("hook %s missing failure-diagnostic echo into HOOK_LOG:\n%s", tc.filename, content)
 			}
 			// on_close hook must also trigger convoy autoclose and wisp autoclose.
 			if tc.filename == "on_close" {
@@ -205,6 +217,67 @@ func TestInstallBeadHooksInitIntegration(t *testing.T) {
 	hookPath := filepath.Join(cityPath, ".beads", "hooks", "on_create")
 	if _, err := os.Stat(hookPath); err != nil {
 		t.Errorf("gc init did not install bd hooks: %v", err)
+	}
+}
+
+// TestCloseHookLogsFailureDiagnostic runs the installed on_close hook
+// under sh with a deliberately broken GC_BIN and asserts that a dated
+// diagnostic line lands in BEADS_DIR/hooks.log for each of the three
+// gc invocations the hook is supposed to make. This is the visibility
+// gap the script's `>/dev/null 2>&1 || true` pattern hid.
+func TestCloseHookLogsFailureDiagnostic(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+
+	dir := t.TempDir()
+	if err := installBeadHooks(dir); err != nil {
+		t.Fatalf("installBeadHooks: %v", err)
+	}
+	hookPath := filepath.Join(dir, ".beads", "hooks", "on_close")
+	beadsDir := filepath.Join(dir, ".beads")
+
+	cmd := exec.Command("sh", hookPath, "test-bead-id", "bead.closed")
+	cmd.Stdin = strings.NewReader(`{"title":"hook diagnostic test"}`)
+	cmd.Env = append(os.Environ(),
+		"GC_BIN=/nonexistent/gc-bin-for-test",
+		"BEADS_DIR="+beadsDir,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("hook exec failed: %v\nout: %s", err, out)
+	}
+
+	// Hook detaches into background; poll briefly for the log to be flushed.
+	logPath := filepath.Join(beadsDir, "hooks.log")
+	deadline := time.Now().Add(3 * time.Second)
+	var content string
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(logPath)
+		if err == nil && len(data) > 0 {
+			content = string(data)
+			// Wait until all three failure markers have been emitted, since
+			// the three gc calls run sequentially.
+			if strings.Contains(content, "gc event emit") &&
+				strings.Contains(content, "gc convoy autoclose") &&
+				strings.Contains(content, "gc wisp autoclose") {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if content == "" {
+		t.Fatalf("hooks.log not written or empty under %s", beadsDir)
+	}
+	for _, want := range []string{
+		"test-bead-id",
+		"/nonexistent/gc-bin-for-test",
+		"gc event emit bead.closed failed",
+		"gc convoy autoclose failed",
+		"gc wisp autoclose failed",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("hooks.log missing %q:\n%s", want, content)
+		}
 	}
 }
 
