@@ -773,7 +773,13 @@ func tryReloadConfig(tomlPath, lockedWorkspaceName, cityRoot string) (*reloadRes
 		return nil, fmt.Errorf("fetching packs: %w", err)
 	}
 
-	newCfg, prov, err := config.LoadWithIncludes(fsys.OSFS{}, tomlPath, extraConfigFiles...)
+	if err := MaterializeBuiltinPacks(cityRoot); err != nil {
+		return nil, fmt.Errorf("materializing builtin packs: %w", err)
+	}
+	allIncludes := make([]string, 0, len(extraConfigFiles)+3)
+	allIncludes = append(allIncludes, extraConfigFiles...)
+	allIncludes = append(allIncludes, builtinPackIncludes(cityRoot)...)
+	newCfg, prov, err := config.LoadWithIncludes(fsys.OSFS{}, tomlPath, allIncludes...)
 	if err != nil {
 		return nil, fmt.Errorf("parsing city.toml: %w", err)
 	}
