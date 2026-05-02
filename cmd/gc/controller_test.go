@@ -493,12 +493,12 @@ func TestControllerReloadsConfig(t *testing.T) {
 	deadline = time.After(1500 * time.Millisecond)
 	for {
 		names, _ := lastAgentNames.Load().([]string)
-		if len(names) == 2 && names[0] == "mayor" && names[1] == "worker" {
+		if containsAgentNames(names, "mayor", "worker") {
 			break
 		}
 		select {
 		case <-deadline:
-			t.Errorf("expected [mayor worker], got %v", names)
+			t.Errorf("expected mayor and worker, got %v", names)
 			return
 		default:
 			time.Sleep(10 * time.Millisecond)
@@ -580,12 +580,12 @@ func TestControllerReloadsConfigImmediatelyOnWatchEvent(t *testing.T) {
 	deadline = time.After(5 * time.Second)
 	for {
 		names, _ := lastAgentNames.Load().([]string)
-		if len(names) == 2 && names[0] == "mayor" && names[1] == "worker" {
+		if containsAgentNames(names, "mayor", "worker") {
 			break
 		}
 		select {
 		case <-deadline:
-			t.Errorf("expected [mayor worker], got %v", names)
+			t.Errorf("expected mayor and worker, got %v", names)
 			return
 		default:
 			time.Sleep(10 * time.Millisecond)
@@ -1077,8 +1077,11 @@ func TestControllerReloadsNamedSessionModeAndAppliesIdleTimeout(t *testing.T) {
 	}
 
 	buildFn := func(c *config.City, _ runtime.Provider, _ beads.Store) DesiredStateResult {
-		if len(c.Agents) > 0 {
-			lastIdleTimeout.Store(c.Agents[0].IdleTimeout)
+		for _, agent := range c.Agents {
+			if agent.Name == "mayor" {
+				lastIdleTimeout.Store(agent.IdleTimeout)
+				break
+			}
 		}
 		ds := make(map[string]TemplateParams)
 		for _, a := range c.Agents {
@@ -1295,13 +1298,12 @@ func TestControllerReloadInvalidConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Wait for a tick to process the bad config.
-	target := reconcileCount.Load() + 2
 	deadline := time.After(3 * time.Second)
-	for reconcileCount.Load() < target {
+	for !strings.Contains(stderr.String(), "config reload") {
 		select {
 		case <-deadline:
-			t.Fatal("timed out waiting for tick after invalid config")
+			t.Fatalf("timed out waiting for invalid config reload; reconciles=%d stdout=%q stderr=%q",
+				reconcileCount.Load(), stdout.String(), stderr.String())
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -1493,9 +1495,22 @@ func TestControllerReloadCommandReloadsConfigImmediately(t *testing.T) {
 	}
 
 	names, _ := lastAgentNames.Load().([]string)
-	if len(names) != 2 || names[0] != "mayor" || names[1] != "worker" {
-		t.Fatalf("expected [mayor worker], got %v", names)
+	if !containsAgentNames(names, "mayor", "worker") {
+		t.Fatalf("expected mayor and worker, got %v", names)
 	}
+}
+
+func containsAgentNames(got []string, want ...string) bool {
+	seen := make(map[string]bool, len(got))
+	for _, name := range got {
+		seen[name] = true
+	}
+	for _, name := range want {
+		if !seen[name] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestControllerPokeTriggersImmediate(t *testing.T) {
