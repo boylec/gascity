@@ -22,15 +22,15 @@ const packFile = "pack.toml"
 // currentPackSchema is the supported pack schema version.
 const currentPackSchema = 2
 
-// packConfig is the TOML structure of a pack.toml file.
+// PackConfig is the TOML structure of a pack.toml file.
 // It has a [pack] metadata header and agent definitions.
-type packConfig struct {
-	Pack           PackMeta                `toml:"pack"`
+type PackConfig struct {
+	Pack           PackMeta                `toml:"pack" jsonschema:"required"`
 	Imports        map[string]Import       `toml:"imports,omitempty"`
 	AgentDefaults  AgentDefaults           `toml:"agent_defaults,omitempty"`
 	AgentsDefaults AgentDefaults           `toml:"agents,omitempty" jsonschema:"-"`
-	Defaults       packDefaults            `toml:"defaults,omitempty"`
-	Agents         []Agent                 `toml:"agent"`
+	Defaults       PackDefaults            `toml:"defaults,omitempty"`
+	Agents         []Agent                 `toml:"agent,omitempty"`
 	NamedSessions  []NamedSession          `toml:"named_session,omitempty"`
 	Services       []Service               `toml:"service,omitempty"`
 	Providers      map[string]ProviderSpec `toml:"providers,omitempty"`
@@ -41,11 +41,15 @@ type packConfig struct {
 	Global         PackGlobal              `toml:"global,omitempty"`
 }
 
-type packDefaults struct {
-	Rig packRigDefaults `toml:"rig,omitempty"`
+// PackDefaults holds [defaults] entries declared by a pack — used by
+// cities that compose this pack to seed rig configuration.
+type PackDefaults struct {
+	Rig PackRigDefaults `toml:"rig,omitempty"`
 }
 
-type packRigDefaults struct {
+// PackRigDefaults holds the [defaults.rig] block — defaults applied
+// to rigs created from this pack.
+type PackRigDefaults struct {
 	Imports map[string]Import `toml:"imports,omitempty"`
 }
 
@@ -994,16 +998,16 @@ type packLoadResult struct {
 	warnings       []string
 }
 
-func parsePackConfigWithMeta(data []byte, source string) (packConfig, []string, error) {
+func parsePackConfigWithMeta(data []byte, source string) (PackConfig, []string, error) {
 	cfg, _, warnings, err := parsePackConfigWithMetadata(data, source)
 	return cfg, warnings, err
 }
 
-func parsePackConfigWithMetadata(data []byte, source string) (packConfig, toml.MetaData, []string, error) {
-	var cfg packConfig
+func parsePackConfigWithMetadata(data []byte, source string) (PackConfig, toml.MetaData, []string, error) {
+	var cfg PackConfig
 	md, err := toml.Decode(string(data), &cfg)
 	if err != nil {
-		return packConfig{}, md, nil, err
+		return PackConfig{}, md, nil, err
 	}
 	normalizePackAgentDefaultsAlias(&cfg, md)
 	warnings := agentDefaultsCompatibilityWarnings(md, source)
@@ -1011,7 +1015,7 @@ func parsePackConfigWithMetadata(data []byte, source string) (packConfig, toml.M
 	return cfg, md, warnings, nil
 }
 
-func normalizePackAgentDefaultsAlias(cfg *packConfig, meta toml.MetaData) {
+func normalizePackAgentDefaultsAlias(cfg *PackConfig, meta toml.MetaData) {
 	if !meta.IsDefined("agents") {
 		cfg.AgentsDefaults = AgentDefaults{}
 		return
@@ -2626,7 +2630,7 @@ func packSummaryOne(fs fsys.FS, ref, cityRoot string) string {
 	if err != nil {
 		return ref + " (unreadable)"
 	}
-	var tc packConfig
+	var tc PackConfig
 	if _, err := toml.Decode(string(data), &tc); err != nil {
 		return ref + " (parse error)"
 	}
@@ -2679,7 +2683,7 @@ func LoadPackDoctorEntries(fs fsys.FS, topoDirs []string) []PackDoctorInfo {
 			continue
 		}
 
-		var tc packConfig
+		var tc PackConfig
 		if _, err := toml.Decode(string(data), &tc); err != nil {
 			continue
 		}
@@ -2730,7 +2734,7 @@ func LoadPackCommandEntries(fs fsys.FS, packDirs []string) []PackCommandInfo {
 			continue
 		}
 
-		var tc packConfig
+		var tc PackConfig
 		if _, err := toml.Decode(string(data), &tc); err != nil {
 			continue
 		}
