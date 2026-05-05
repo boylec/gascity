@@ -1310,13 +1310,10 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 		readyWaitSet = nil
 	}
 
-	// workSet: defense-in-depth wake signal from work_query. When work_query
-	// detects pending work but scale_check hasn't caught up yet, workSet
-	// ensures at least one session wakes without waiting for the next tick.
-	workSet := result.WorkSet
-	if workSet == nil {
-		workSet = computeWorkSet(cr.cfg, shellScaleCheck, cityName, cr.cityPath, store, sessionBeads, cr.stderr)
-	}
+	// Controller wake demand comes from assigned-work scans and scale_check.
+	// work_query remains the agent-side gc hook claim path; running every
+	// work_query here can block assigned-work resumes behind unrelated probes.
+	workSet := make(map[string]bool)
 	if trace != nil {
 		templateNames := make(map[string]struct{})
 		openCounts := make(map[string]int)
@@ -1542,6 +1539,7 @@ func sweepUndesiredPoolSessionBeads(
 	if store == nil || sessionBeads == nil || cfg == nil || storeQueryPartial {
 		return 0
 	}
+	startupTimeout := cfg.Session.StartupTimeoutDuration()
 	var candidates []beads.Bead
 	for _, bead := range sessionBeads.Open() {
 		if bead.Status == "closed" {
@@ -1557,11 +1555,11 @@ func sweepUndesiredPoolSessionBeads(
 			continue
 		}
 		// Don't sweep beads that the reconciler still considers "start
-		// requested" — their work assignment window hasn't opened. Mirrors
-		// sessionStartRequested (session_reconcile.go) exactly so the two
-		// loops agree about ownership:
-		//   - pending_create_claim=true: in-flight create claim, protected
-		//     regardless of age until the lifecycle clears it.
+		// requested" — their work assignment window hasn't opened. The
+		// pending_create_claim lease mirrors the reconciler's recovery model:
+		// fresh start-in-flight and never-started queue entries are protected,
+		// but once that lease expires the crashed creator must not strand the
+		// pool slot forever.
 		//   - state=creating: protected until staleCreatingState would
 		//     return true (i.e., until staleCreatingStateTimeout has
 		//     elapsed; zero CreatedAt is treated as stale, matching
@@ -1570,7 +1568,7 @@ func sweepUndesiredPoolSessionBeads(
 		// on the same tick it's created (no work assigned →
 		// GCSweepSessionBeads closes it), spinning the pool in a rapid
 		// create→sweep→recreate loop.
-		if strings.TrimSpace(bead.Metadata["pending_create_claim"]) == "true" {
+		if pendingCreateClaimStillLeasedForSweep(bead, startupTimeout) {
 			continue
 		}
 		if strings.TrimSpace(bead.Metadata["state"]) == "creating" && !isStaleCreating(bead) {
@@ -1634,6 +1632,14 @@ func sweepUndesiredPoolSessionBeads(
 		candidates = append(candidates, bead)
 	}
 	return len(GCSweepSessionBeads(store, rigStores, candidates))
+}
+
+// pendingCreateClaimStillLeasedForSweep keeps pending_create_claim protection
+// aligned with the reconciler: start-in-flight claims stay protected for the
+// provider-start lease, never-started creates get the longer queue lease, and
+// stale claims stop blocking pool-slot recovery.
+func pendingCreateClaimStillLeasedForSweep(bead beads.Bead, startupTimeout time.Duration) bool {
+	return pendingCreateLeaseActive(bead, nil, startupTimeout)
 }
 
 // isStaleCreating mirrors staleCreatingState in session_reconcile.go without
@@ -1837,7 +1843,7 @@ func (cr *CityRuntime) loadDemandSnapshot(
 			result.PoolDesiredCounts = make(map[string]int)
 		}
 		mergeNamedSessionDemand(result.PoolDesiredCounts, result.NamedSessionDemand, cr.cfg)
-		result.WorkSet = computeWorkSet(cr.cfg, shellScaleCheck, cr.cityName, cr.cityPath, cr.cityBeadStore(), sessionBeads, cr.stderr)
+		result.WorkSet = make(map[string]bool)
 		cr.demandSnapshot = &runtimeDemandSnapshot{
 			createdAt:          time.Now(),
 			sessionFingerprint: sessionFingerprint,
@@ -1881,7 +1887,7 @@ func demandSnapshotDemandSourcesEventBacked(cfg *config.City) bool {
 		return false
 	}
 	for i := range cfg.Agents {
-		if strings.TrimSpace(cfg.Agents[i].ScaleCheck) != "" || strings.TrimSpace(cfg.Agents[i].WorkQuery) != "" {
+		if strings.TrimSpace(cfg.Agents[i].ScaleCheck) != "" {
 			return false
 		}
 	}
