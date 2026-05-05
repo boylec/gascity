@@ -159,6 +159,29 @@ func TestProjectLifecycleDesiredStateAndBlockers(t *testing.T) {
 	}
 }
 
+func TestProjectLifecycleCreatingStalenessUsesPendingCreateStartedAt(t *testing.T) {
+	now := time.Date(2026, 5, 3, 9, 0, 0, 0, time.UTC)
+	view := ProjectLifecycle(LifecycleInput{
+		Status: "open",
+		Metadata: map[string]string{
+			"state":                     string(StateCreating),
+			"session_name":              "s-worker",
+			"pending_create_started_at": now.Add(-30 * time.Second).UTC().Format(time.RFC3339),
+		},
+		Runtime:            RuntimeFacts{Observed: true, Alive: false},
+		CreatedAt:          now.Add(-2 * time.Minute),
+		StaleCreatingAfter: time.Minute,
+		Now:                now,
+	})
+
+	if view.RuntimeProjection != RuntimeProjectionFreshCreating {
+		t.Fatalf("RuntimeProjection = %q, want %q", view.RuntimeProjection, RuntimeProjectionFreshCreating)
+	}
+	if view.ReconciledState != StateCreating {
+		t.Fatalf("ReconciledState = %q, want %q", view.ReconciledState, StateCreating)
+	}
+}
+
 func TestProjectLifecycleNamedIdentityProjection(t *testing.T) {
 	now := time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC)
 
@@ -346,6 +369,23 @@ func TestProjectLifecycleRuntimeLivenessProjection(t *testing.T) {
 			wantReset:           true,
 		},
 		{
+			name: "dead active runtime with rate-limit reason preserves resume identity",
+			input: LifecycleInput{
+				Status: "open",
+				Metadata: map[string]string{
+					"state":               "active",
+					"session_name":        "s-worker",
+					"session_key":         "provider-conversation",
+					"started_config_hash": "config",
+					"sleep_reason":        "rate_limit",
+				},
+				Runtime: RuntimeFacts{Observed: true, Alive: false},
+				Now:     now,
+			},
+			wantRuntime:         RuntimeProjectionMissing,
+			wantReconciledState: StateAsleep,
+		},
+		{
 			name: "fresh creating state stays creating after restart",
 			input: LifecycleInput{
 				Status: "open",
@@ -508,6 +548,14 @@ func TestLifecycleDisplayReasonUsesOnlyActiveLifecycleReasons(t *testing.T) {
 			name: "expired production context churn reason is not visible",
 			meta: map[string]string{
 				"sleep_reason":      "context-churn",
+				"quarantined_until": past,
+			},
+			want: "",
+		},
+		{
+			name: "expired rate-limit reason is not visible",
+			meta: map[string]string{
+				"sleep_reason":      "rate_limit",
 				"quarantined_until": past,
 			},
 			want: "",

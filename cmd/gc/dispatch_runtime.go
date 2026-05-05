@@ -445,7 +445,7 @@ func workflowServeControlReadyQuery(agentCfg config.Agent, controlSessionNames .
 		target = config.ControlDispatcherAgentName
 	}
 	limit := fmt.Sprintf("%d", workflowServeScanLimit)
-	queryPrefix := `GC_CONTROL_TARGET=` + shellquote.Quote(target)
+	queryPrefix := `BD_EXPORT_AUTO=false GC_CONTROL_TARGET=` + shellquote.Quote(target)
 	for _, name := range controlSessionNames {
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -458,22 +458,23 @@ func workflowServeControlReadyQuery(agentCfg config.Agent, controlSessionNames .
 		queryPrefix += ` GC_CONTROL_LEGACY_TARGET=` + shellquote.Quote(legacy)
 	}
 	query := queryPrefix + ` sh -c '` +
+		`tmp=$(mktemp); trap "rm -f \"$tmp\"" EXIT; ` +
+		`emit_ready() { r=$("$@" 2>/dev/null || true); [ -n "$r" ] && [ "$r" != "[]" ] && printf "%s\n" "$r" >> "$tmp"; }; ` +
 		`for id in "$GC_CONTROL_SESSION_NAME" "$GC_SESSION_NAME" "$GC_ALIAS" "$GC_CONTROL_TARGET" "$GC_SESSION_ID"; do ` +
 		`[ -z "$id" ] && continue; ` +
 		`legacy=""; case "$id" in *control-dispatcher) legacy="${id%control-dispatcher}workflow-control";; esac; ` +
 		`for cand in "$id" "$legacy"; do ` +
 		`[ -z "$cand" ] && continue; ` +
-		`r=$(bd ready --assignee="$cand" --json --limit=` + limit + ` 2>/dev/null); ` +
-		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
+		`emit_ready bd --readonly --sandbox ready --assignee="$cand" --json --limit=` + limit + `; ` +
 		`done; ` +
 		`done; ` +
-		`r=$(bd ready --metadata-field "gc.routed_to=$GC_CONTROL_TARGET" --unassigned --json --limit=` + limit + ` 2>/dev/null); ` +
-		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; `
+		`emit_ready bd --readonly --sandbox ready --metadata-field "gc.routed_to=$GC_CONTROL_TARGET" --unassigned --json --limit=` + limit + `; `
 	if legacy := workflowServeLegacyControlRoute(target); legacy != "" {
-		query += `bd ready --metadata-field "gc.routed_to=$GC_CONTROL_LEGACY_TARGET" --unassigned --json --limit=` + limit + ` 2>/dev/null'`
+		query += `emit_ready bd --readonly --sandbox ready --metadata-field "gc.routed_to=$GC_CONTROL_LEGACY_TARGET" --unassigned --json --limit=` + limit + `; `
 	} else {
-		query += `printf "[]"` + `'`
+		query += `:; `
 	}
+	query += `[ -s "$tmp" ] && jq -s "reduce add[] as \$item ([]; if any(.[]; .id == \$item.id) then . else . + [\$item] end)" "$tmp" || printf "[]"` + `'`
 	return query
 }
 
