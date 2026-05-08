@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -277,6 +278,52 @@ func TestInstallCodexUpgradesGeneratedFileMissingHookFormat(t *testing.T) {
 	got := string(fs.Files["/work/.codex/hooks.json"])
 	if !strings.Contains(got, "--hook-format codex") {
 		t.Errorf("upgraded codex hooks missing Codex hook output format:\n%s", got)
+	}
+}
+
+func TestInstallCodexWritesCanonicalHookBytes(t *testing.T) {
+	fs := fsys.NewFake()
+	if err := Install(fs, "/city", "/work", []string{"codex"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	got := fs.Files["/work/.codex/hooks.json"]
+	normalized, changed, err := normalizeCodexHookCommands(got)
+	if err != nil {
+		t.Fatalf("normalizeCodexHookCommands: %v", err)
+	}
+	if changed || !bytes.Equal(normalized, got) {
+		t.Fatalf("codex hook install should write canonical bytes")
+	}
+}
+
+func TestInstallCodexIsByteStableAcrossRepeatedInstalls(t *testing.T) {
+	fs := fsys.NewFake()
+	if err := Install(fs, "/city", "/work", []string{"codex"}); err != nil {
+		t.Fatalf("first Install: %v", err)
+	}
+	before := append([]byte(nil), fs.Files["/work/.codex/hooks.json"]...)
+
+	if err := Install(fs, "/city", "/work", []string{"codex"}); err != nil {
+		t.Fatalf("second Install: %v", err)
+	}
+	after := fs.Files["/work/.codex/hooks.json"]
+	if !bytes.Equal(before, after) {
+		t.Fatalf("second Install rewrote codex hooks:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestInstallCodexPreservesCustomOnlyHooksByteForByte(t *testing.T) {
+	fs := fsys.NewFake()
+	custom := []byte(`{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"printf custom-codex-hook","type":"command"}]}]}}`)
+	fs.Files["/work/.codex/hooks.json"] = append([]byte(nil), custom...)
+
+	if err := Install(fs, "/city", "/work", []string{"codex"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	got := fs.Files["/work/.codex/hooks.json"]
+	if !bytes.Equal(custom, got) {
+		t.Fatalf("custom-only codex hooks were rewritten:\nbefore:\n%s\nafter:\n%s", custom, got)
 	}
 }
 
