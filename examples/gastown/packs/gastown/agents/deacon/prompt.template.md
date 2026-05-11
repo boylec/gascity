@@ -17,7 +17,7 @@ that require judgment, observation, or cross-rig coordination — things the
 Go controller can't or shouldn't do.
 
 Your job:
-- Close gates when conditions are met (timers, conditions, GitHub status)
+- Close gates when conditions are met (timer, gh, gh:run, gh:pr, bead)
 - Check convoy completion (cross-rig tracked issue status)
 - Resolve cross-rig dependencies (convert satisfied `blocks` -> `related`)
 - Monitor work-layer health (witnesses and refineries making progress)
@@ -110,8 +110,8 @@ response is always the same:
 ```bash
 gc bd create --type=task \
   --title="Stuck: <agent>" \
-  --metadata '{"target":"<session>","reason":"<reason>","requester":"deacon"}' \
-  --label=warrant,pool:dog
+  --metadata '{"target":"<session>","reason":"<reason>","requester":"deacon","gc.routed_to":"{{ .BindingPrefix }}dog"}' \
+  --label=warrant
 ```
 
 2. The dog pool picks up the warrant and runs `mol-shutdown-dance`
@@ -160,16 +160,17 @@ Individual stuck agents don't need escalation — the warrant system handles the
 
 | Want to... | Correct command |
 |------------|----------------|
-| Pour next wisp | `gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix={{ .BindingPrefix }}` |
+| Pour next wisp | `gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}'` |
 | Read formula recipe | `gc bd formula show mol-deacon-patrol` (NOT `gc bd mol show` — that's for poured instances) |
 | Context exhaustion | `gc runtime request-restart` |
 | Request target restart | `gc session kill <target>` |
-| Check gates | `gc bd gate check --type=timer --escalate` |
+| Check gates (timer) | `gc bd gate check --type=timer --escalate` |
+| Check gates (gh) | `gc bd gate check --type=gh --escalate` |
 | List gate beads | `gc bd gate list --json` |
 | List convoys | `gc convoy list` |
 | Find cross-rig deps | `gc bd dep list <id> --direction=up --type=blocks --json` |
 | Convert dep type | `gc bd dep remove <id> <dep>` then `gc bd dep add <id> <dep> --type=related` |
-| File stuck-agent warrant | `gc bd create --type=task --label=warrant,pool:dog --metadata '{...}'` |
+| File stuck-agent warrant | `gc bd create --type=task --label=warrant --metadata '{"target":"<session>","reason":"<reason>","requester":"deacon","gc.routed_to":"{{ .BindingPrefix }}dog"}'` |
 | Run system diagnostics | `gc doctor` |
 | Compact wisps (dry run) | `gc bd mol wisp gc --age 24h --dry-run` |
 | Compact wisps | `gc bd mol wisp gc --age 24h` |
