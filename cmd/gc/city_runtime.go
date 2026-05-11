@@ -91,12 +91,17 @@ type CityRuntime struct {
 	reloadReqCh         chan reloadRequest       // receives structured reload requests from controller.sock
 	pokeCh              chan struct{}            // non-blocking signal to trigger immediate reconciler tick
 	controlDispatcherCh chan struct{}            // non-blocking signal for control-dispatcher-only reconcile
+	nudgeWakeCh         chan struct{}            // signal to dispatch queued nudges; fed by wake socket listener
 	activeReload        *reloadRequest
 	onStarted           func()
 	onStatus            func(string)
+	managedDoltHealth   func(string) error
+	managedDoltOwned    func(string) (bool, error)
+	managedDoltPort     func(string) string
 
 	shutdownOnce             sync.Once
 	preserveSessionsShutdown atomic.Bool
+	forceStopShutdown        *atomic.Bool
 	logPrefix                string // "gc start" or "gc supervisor"
 	stdout, stderr           io.Writer
 }
@@ -131,6 +136,7 @@ type CityRuntimeParams struct {
 
 	PoolSessions      map[string]time.Duration
 	PoolDeathHandlers map[string]poolDeathInfo
+	ForceStopShutdown *atomic.Bool
 
 	ConvergenceReqCh    chan convergenceRequest // may be nil
 	ReloadReqCh         chan reloadRequest      // may be nil; receives structured reload commands
@@ -138,6 +144,9 @@ type CityRuntimeParams struct {
 	ControlDispatcherCh chan struct{}           // may be nil; triggers control-dispatcher-only reconcile
 	OnStarted           func()                  // called after initial reconciliation succeeds
 	OnStatus            func(string)            // called when init status changes
+	ManagedDoltHealth   func(string) error
+	ManagedDoltOwned    func(string) (bool, error)
+	ManagedDoltPort     func(string) string
 
 	LogPrefix      string // "gc start" or "gc supervisor"; defaults to "gc start"
 	Stdout, Stderr io.Writer
@@ -174,6 +183,26 @@ func newCityRuntime(p CityRuntimeParams) *CityRuntime {
 			p.Cfg.Daemon.WispTTLDuration())
 	}
 
+	managedDoltHealth := p.ManagedDoltHealth
+	if managedDoltHealth == nil {
+		managedDoltHealth = healthBeadsProvider
+	}
+	managedDoltOwned := p.ManagedDoltOwned
+	if managedDoltOwned == nil {
+		managedDoltOwned = managedDoltLifecycleOwned
+	}
+	managedDoltPort := p.ManagedDoltPort
+	if managedDoltPort == nil {
+		managedDoltPort = currentManagedDoltPort
+	}
+
+	logPrefix := p.LogPrefix
+	if logPrefix == "" {
+		logPrefix = "gc start"
+	}
+
+	ensureManagedDoltPublishedForRuntime(p.CityPath, p.Stderr, logPrefix, managedDoltHealth, managedDoltOwned, managedDoltPort)
+
 	// Sweep orphaned order-tracking beads on startup only (not config reload).
 	// A previous controller instance may have left tracking beads open
 	// (goroutines killed on restart, or silent Close failures).
@@ -190,11 +219,6 @@ func newCityRuntime(p CityRuntimeParams) *CityRuntime {
 	od := buildOrderDispatcher(p.CityPath, p.Cfg, p.Rec, p.Stderr)
 
 	suspendedNames := computeSuspendedNames(p.Cfg, p.CityName, p.CityPath)
-
-	logPrefix := p.LogPrefix
-	if logPrefix == "" {
-		logPrefix = "gc start"
-	}
 
 	cr := &CityRuntime{
 		cityPath:                p.CityPath,
@@ -218,6 +242,7 @@ func newCityRuntime(p CityRuntimeParams) *CityRuntime {
 		rec:                     p.Rec,
 		poolSessions:            p.PoolSessions,
 		poolDeathHandlers:       p.PoolDeathHandlers,
+		forceStopShutdown:       p.ForceStopShutdown,
 		suspendedNames:          suspendedNames,
 		asyncStartLimiter:       newAsyncStartLimiter(maxParallelStartsPerTick(p.Cfg)),
 		convergenceReqCh:        p.ConvergenceReqCh,
@@ -239,11 +264,15 @@ func newCityRuntime(p CityRuntimeParams) *CityRuntime {
 			}
 			return make(chan struct{}, 1)
 		}(),
-		onStarted: p.OnStarted,
-		onStatus:  p.OnStatus,
-		logPrefix: logPrefix,
-		stdout:    p.Stdout,
-		stderr:    p.Stderr,
+		nudgeWakeCh:       make(chan struct{}, 1),
+		onStarted:         p.OnStarted,
+		onStatus:          p.OnStatus,
+		managedDoltHealth: managedDoltHealth,
+		managedDoltOwned:  managedDoltOwned,
+		managedDoltPort:   managedDoltPort,
+		logPrefix:         logPrefix,
+		stdout:            p.Stdout,
+		stderr:            p.Stderr,
 	}
 	cr.svc = workspacesvc.NewManager(&serviceRuntime{cr: cr})
 	if err := cr.svc.Reload(); err != nil {
@@ -417,6 +446,7 @@ func (cr *CityRuntime) run(ctx context.Context) {
 	// ctx cancellation, or normal completion alike.
 	startupComplete := false
 	if !retryStartupStep("startup", func() bool { return startupComplete }, func() {
+		cr.ensureManagedDoltPublishedForTick()
 		sessionBeads := cr.loadSessionBeadSnapshot()
 		startupTrace := cr.beginTraceCycle("startup", "initial_reconcile", sessionBeads)
 		completion := TraceCompletionAborted
@@ -509,6 +539,9 @@ func (cr *CityRuntime) run(ctx context.Context) {
 	// Track pool instance liveness for death detection.
 	var prevPoolRunning map[string]bool
 	runTick := func(trigger string) {
+		if ctx.Err() != nil {
+			return
+		}
 		cr.safeTick(func() {
 			cr.tick(ctx, dirty, &lastProviderName, cityRoot, &prevPoolRunning, trigger)
 		}, trigger)
@@ -524,6 +557,18 @@ func (cr *CityRuntime) run(ctx context.Context) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	// Start the supervisor nudge dispatcher when configured. The wake-socket
+	// listener feeds nudgeWakeCh on every producer enqueue, giving sub-second
+	// dispatch latency. Patrol-tick fallback inside cr.tick() guarantees
+	// eventual delivery if the wake is missed (socket race, listener
+	// restart). Legacy mode skips the listener entirely; per-session
+	// pollers continue to own delivery.
+	if nudgeDispatcherIsSupervisor(cr.cfg) && cr.cityPath != "" {
+		if _, err := startNudgeWakeListener(ctx, cr.cityPath, cr.nudgeWakeCh, cr.stderr, cr.logPrefix); err != nil {
+			fmt.Fprintf(cr.stderr, "%s: nudge dispatcher: %v (falling back to patrol-only delivery)\n", cr.logPrefix, err) //nolint:errcheck // best-effort stderr
+		}
+	}
+
 	for {
 		select {
 		case <-ticker.C:
@@ -533,6 +578,10 @@ func (cr *CityRuntime) run(ctx context.Context) {
 			// session. Trigger an immediate tick so the reconciler sees the new
 			// work via workSet/poolDesired and wakes the target promptly.
 			runTick("poke")
+		case <-cr.nudgeWakeCh:
+			cr.safeTick(func() {
+				cr.nudgeDispatchTick(ctx)
+			}, "nudge-wake")
 		case <-cr.controlDispatcherCh:
 			cr.safeTick(func() {
 				cr.controlDispatcherTick(ctx)
@@ -615,6 +664,10 @@ func (cr *CityRuntime) tick(
 	prevPoolRunning *map[string]bool,
 	trigger string,
 ) {
+	if ctx.Err() != nil {
+		return
+	}
+	cr.ensureManagedDoltPublishedForTick()
 	sessionBeads := cr.loadSessionBeadSnapshot()
 	traceTrigger := trigger
 	traceDetail := "controller_tick"
@@ -699,10 +752,16 @@ func (cr *CityRuntime) tick(
 			manualReloadCompleted = true
 		}
 	}
+	if ctx.Err() != nil {
+		return
+	}
 
 	// Order dispatch is intentionally before the expensive session reconcile
 	// phases so due formulas are not starved by slow startup/config drift work.
 	cr.dispatchOrders(ctx, cityRoot)
+	if ctx.Err() != nil {
+		return
+	}
 
 	// Session bead sync BEFORE reconciliation (one-tick state lag; see run()).
 	// Post-reconcile sync was intentionally removed: the daemon's next tick
@@ -713,6 +772,9 @@ func (cr *CityRuntime) tick(
 	cleanupDeadRuntimeSessionCorpses(sessionBeads, cr.sessionDrains, cr.sp, cr.stderr)
 	if reapStaleSessionBeads(cr.cityBeadStore(), cr.sp, cr.sessionDrains, clock.Real{}, cr.stderr) > 0 {
 		sessionBeads = cr.loadSessionBeadSnapshot()
+	}
+	if ctx.Err() != nil {
+		return
 	}
 	demand := cr.loadDemandSnapshot(sessionBeads, trace, trigger, configChanged)
 	result := demand.result
@@ -1433,9 +1495,13 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 	dispatchSessionBeads, err := loadSessionBeadSnapshot(store)
 	if err != nil {
 		fmt.Fprintf(cr.stderr, "%s: dispatching wait nudges: %v\n", cr.logPrefix, err) //nolint:errcheck
-	} else if err := dispatchReadyWaitNudgesWithSnapshot(cr.cityPath, store, time.Now(), dispatchSessionBeads); err != nil {
+	} else if err := dispatchReadyWaitNudgesWithSnapshot(cr.cityPath, cr.cfg, store, time.Now(), dispatchSessionBeads); err != nil {
 		fmt.Fprintf(cr.stderr, "%s: dispatching wait nudges: %v\n", cr.logPrefix, err) //nolint:errcheck
 	}
+	// Patrol-tick fallback for the supervisor nudge dispatcher: ensures
+	// queued items get delivered even if the wake socket missed the
+	// enqueue (process race during supervisor restart, listener crash).
+	cr.nudgeDispatchTick(ctx)
 
 	// Idle recovery: detect pool sessions stuck at the prompt after
 }
@@ -1519,9 +1585,9 @@ func (cr *CityRuntime) requestAsyncStartFollowUpTick() {
 	}
 }
 
-func (cr *CityRuntime) waitForAsyncStarts() {
+func (cr *CityRuntime) waitForAsyncStarts() bool {
 	if cr == nil {
-		return
+		return true
 	}
 	timeout := time.Duration(0)
 	if cr.cfg != nil {
@@ -1530,9 +1596,17 @@ func (cr *CityRuntime) waitForAsyncStarts() {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	if !cr.asyncStarts.wait(timeout) && cr.stderr != nil {
-		fmt.Fprintf(cr.stderr, "%s: async session starts still running after %s; continuing shutdown\n", cr.logPrefix, timeout) //nolint:errcheck // best-effort stderr
+	// A force stop may leave provider Start calls to finish after shutdown has
+	// stopped waiting. That favors bounded shutdown; the next controller start
+	// re-lists live runtime sessions after the first stop pass so late-created
+	// sessions do not survive the shutdown that abandoned the async wait.
+	if !cr.asyncStarts.waitUntil(timeout, cr.forceStopRequested) {
+		if cr.stderr != nil && !cr.forceStopRequested() {
+			fmt.Fprintf(cr.stderr, "%s: async session starts still running after %s; continuing shutdown\n", cr.logPrefix, timeout) //nolint:errcheck // best-effort stderr
+		}
+		return false
 	}
+	return true
 }
 
 func sweepUndesiredPoolSessionBeads(
@@ -1686,6 +1760,27 @@ func parseRFC3339Metadata(v string) (time.Time, bool) {
 	return t, true
 }
 
+// nudgeDispatchTick runs one supervisor-side nudge dispatch pass. Called
+// from the main run loop on wake-socket signal and (belt-and-suspenders)
+// at the end of each patrol tick so a missed wake doesn't strand a queue
+// item past the patrol interval.
+func (cr *CityRuntime) nudgeDispatchTick(_ context.Context) {
+	if !nudgeDispatcherIsSupervisor(cr.cfg) {
+		return
+	}
+	store := cr.cityBeadStore()
+	if store == nil {
+		return
+	}
+	sessionBeads := cr.loadSessionBeadSnapshot()
+	if sessionBeads == nil {
+		return
+	}
+	if _, err := dispatchAllQueuedNudges(cr.cityPath, cr.cfg, store, cr.sp, sessionBeads); err != nil {
+		fmt.Fprintf(cr.stderr, "%s: nudge dispatcher: %v\n", cr.logPrefix, err) //nolint:errcheck
+	}
+}
+
 func (cr *CityRuntime) controlDispatcherTick(ctx context.Context) {
 	store := cr.cityBeadStore()
 	if store == nil || cr.sessionDrains == nil {
@@ -1696,6 +1791,8 @@ func (cr *CityRuntime) controlDispatcherTick(ctx context.Context) {
 	if filteredCfg == nil {
 		return
 	}
+
+	cr.ensureManagedDoltPublishedForTick()
 
 	sessionBeads := cr.loadSessionBeadSnapshot()
 	wfcResult := buildDesiredStateWithSessionBeads(
@@ -1765,6 +1862,49 @@ func (cr *CityRuntime) controlDispatcherTick(ctx context.Context) {
 		cr.stderr,
 	)
 	cr.requestDeferredDrainFollowUpTick()
+}
+
+func (cr *CityRuntime) ensureManagedDoltPublishedForTick() {
+	healthFn := cr.managedDoltHealth
+	if healthFn == nil {
+		healthFn = healthBeadsProvider
+	}
+	ownedFn := cr.managedDoltOwned
+	if ownedFn == nil {
+		ownedFn = managedDoltLifecycleOwned
+	}
+	portFn := cr.managedDoltPort
+	if portFn == nil {
+		portFn = currentManagedDoltPort
+	}
+	ensureManagedDoltPublishedForRuntime(cr.cityPath, cr.stderr, cr.logPrefix, healthFn, ownedFn, portFn)
+}
+
+func ensureManagedDoltPublishedForRuntime(
+	cityPath string,
+	stderr io.Writer,
+	logPrefix string,
+	healthFn func(string) error,
+	ownedFn func(string) (bool, error),
+	portFn func(string) string,
+) {
+	if !cityUsesBdStoreContract(cityPath) {
+		return
+	}
+	owned, err := ownedFn(cityPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: managed dolt ownership preflight: %v\n", logPrefix, err) //nolint:errcheck // best-effort stderr
+		return
+	}
+	if !owned {
+		return
+	}
+	if portFn(cityPath) != "" {
+		return
+	}
+	if err := healthFn(cityPath); err != nil {
+		fmt.Fprintf(stderr, "%s: managed dolt health preflight: %v\n", logPrefix, err) //nolint:errcheck // best-effort stderr
+	}
 }
 
 // syncBeadsAndUpdateIndex runs syncSessionBeads.
@@ -2053,7 +2193,7 @@ func (cr *CityRuntime) recordPreservedShutdownTrace() {
 // normal shutdown) — only the first call takes effect.
 func (cr *CityRuntime) shutdown() {
 	cr.shutdownOnce.Do(func() {
-		cr.waitForAsyncStarts()
+		asyncStartsDrained := cr.waitForAsyncStarts()
 		preserveSessions := cr.preserveSessionsShutdown.Load()
 		if preserveSessions {
 			cr.recordPreservedShutdownTrace()
@@ -2081,8 +2221,14 @@ func (cr *CityRuntime) shutdown() {
 		// sweepOrphanedOrderTrackingRetry on next start.
 		total := cr.cfg.Daemon.ShutdownTimeoutDuration()
 		gracefulTimeout := total
+		if cr.forceStopRequested() {
+			gracefulTimeout = 0
+		}
 		if cr.od != nil || len(cr.retiredOrderDispatchers) > 0 {
 			drainTimeout := orderShutdownDrainTimeout(total)
+			if cr.forceStopRequested() {
+				drainTimeout = 0
+			}
 			drainCtx, drainCancel := context.WithTimeout(context.Background(), drainTimeout)
 			cr.drainOrderDispatchers(drainCtx)
 			drainCancel()
@@ -2097,10 +2243,28 @@ func (cr *CityRuntime) shutdown() {
 		}
 		store := cr.cityBeadStore()
 		markCityStopSessionSleepReason(store, cr.stderr)
-		gracefulStopAll(running, cr.sp, gracefulTimeout, cr.rec, cr.cfg, store, cr.stdout, cr.stderr)
+		gracefulStopAllWithForceSignal(running, cr.sp, gracefulTimeout, cr.rec, cr.cfg, store, cr.stdout, cr.stderr, cr.forceStopRequested)
+		if !asyncStartsDrained && cr.forceStopRequested() {
+			lateRunning, lateListErr := cr.sp.ListRunning("")
+			if lateListErr != nil {
+				if runtime.IsPartialListError(lateListErr) {
+					fmt.Fprintf(cr.stderr, "%s: force shutdown late async-start listing partially failed; stopping %d visible agent(s): %v\n", cr.logPrefix, len(lateRunning), lateListErr) //nolint:errcheck // best-effort stderr
+				} else {
+					fmt.Fprintf(cr.stderr, "%s: force shutdown late async-start listing failed: %v\n", cr.logPrefix, lateListErr) //nolint:errcheck // best-effort stderr
+				}
+			}
+			if len(lateRunning) > 0 {
+				markCityStopSessionSleepReason(store, cr.stderr)
+				gracefulStopAllWithForceSignal(lateRunning, cr.sp, 0, cr.rec, cr.cfg, store, cr.stdout, cr.stderr, cr.forceStopRequested)
+			}
+		}
 	})
 }
 
 func (cr *CityRuntime) preserveSessionsOnShutdown() {
 	cr.preserveSessionsShutdown.Store(true)
+}
+
+func (cr *CityRuntime) forceStopRequested() bool {
+	return cr != nil && cr.forceStopShutdown != nil && cr.forceStopShutdown.Load()
 }
