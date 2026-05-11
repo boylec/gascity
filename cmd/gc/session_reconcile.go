@@ -872,6 +872,15 @@ func healState(session *beads.Bead, alive bool, store beads.Store, clk clock.Clo
 	if session == nil {
 		return
 	}
+	// healState is the third writer in the closed-bead flap cycle. The
+	// lifecycle projection still resolves to BaseStateDrained for closed
+	// beads, so without this guard healState writes state=asleep on
+	// every reconciler tick of a terminal bead — alternating with the
+	// gc_swept / orphaned writes from the closeBead path. Closed beads
+	// are terminal; their advisory state metadata should not move.
+	if session.Status == "closed" {
+		return
+	}
 	batch := healStatePatch(*session, alive, clk)
 	if len(batch) == 0 {
 		return
@@ -1086,17 +1095,18 @@ func topoOrder(sessions []beads.Bead, deps map[string][]string) []beads.Bead {
 // during reconciliation to allow forward-compatible rollback from newer
 // versions that add states like "draining" or "archived".
 var knownSessionStates = map[string]bool{
-	"active":      true,
-	"asleep":      true,
-	"awake":       true,
-	"stopped":     true,
-	"suspended":   true,
-	"orphaned":    true,
-	"closed":      true,
-	"quarantined": true,
-	"creating":    true,
-	"drained":     true,
-	"":            true, // empty state is valid (legacy beads)
+	"active":                             true,
+	"asleep":                             true,
+	"awake":                              true,
+	"stopped":                            true,
+	"suspended":                          true,
+	"orphaned":                           true,
+	"closed":                             true,
+	"quarantined":                        true,
+	"creating":                           true,
+	"drained":                            true,
+	string(sessionpkg.StateFailedCreate): true, // processed so skip/orphan-close can release the slot
+	"":                                   true, // empty state is valid (legacy beads)
 }
 
 // isKnownState returns true if the bead's metadata state is recognized by
