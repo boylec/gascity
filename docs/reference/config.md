@@ -15,7 +15,7 @@ City is the top-level configuration for a Gas City instance.
 | `providers` | map[string]ProviderSpec |  |  | Providers defines named provider presets for agent startup. |
 | `packs` | map[string]PackSource |  |  | Packs defines named remote pack sources fetched via git (V1 mechanism). |
 | `imports` | map[string]Import |  |  | Imports defines named pack imports (V2 mechanism). Each key is a binding name; the value specifies the source and optional version, export, and transitive controls. Processed during ExpandCityPacks. |
-| `agent` | []Agent | **yes** |  | Agents lists all configured agents in this city. |
+| `agent` | []Agent |  |  | Agents lists all configured agents in this city. Optional: PackV2 cities compose agents through [imports.*] and ship without any [[agent]] block. |
 | `named_session` | []NamedSession |  |  | NamedSessions lists canonical alias-backed sessions built from reusable agent templates. |
 | `rigs` | []Rig |  |  | Rigs lists external projects registered in the city. |
 | `patches` | Patches |  |  | Patches holds targeted modifications applied after fragment merge. |
