@@ -277,6 +277,18 @@
               "null"
             ]
           },
+          "MaxSessionAge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "MaxSessionAgeJitter": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "MinActiveSessions": {
             "format": "int64",
             "type": [
@@ -469,6 +481,8 @@
           "StartCommand",
           "Nudge",
           "IdleTimeout",
+          "MaxSessionAge",
+          "MaxSessionAgeJitter",
           "SleepAfterIdle",
           "InstallAgentHooks",
           "Skills",
@@ -2021,6 +2035,9 @@
           },
           {
             "$ref": "#/components/schemas/SessionCreateSucceededPayload"
+          },
+          {
+            "$ref": "#/components/schemas/SessionLifecyclePayload"
           },
           {
             "$ref": "#/components/schemas/SessionMessageSucceededPayload"
@@ -5348,6 +5365,12 @@
               "null"
             ]
           },
+          "FormulaVars": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "Name": {
             "type": "string"
           },
@@ -5375,7 +5398,8 @@
           "Path",
           "Prefix",
           "DefaultBranch",
-          "Suspended"
+          "Suspended",
+          "FormulaVars"
         ],
         "type": "object"
       },
@@ -5693,6 +5717,27 @@
         ],
         "type": "object"
       },
+      "SessionLifecyclePayload": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "description": "Short human-readable reason.",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "Canonical session bead ID. Always present.",
+            "type": "string"
+          },
+          "template": {
+            "description": "Session template name when known at the emission site.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
       "SessionMessageInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -5833,6 +5878,9 @@
           "activity": {
             "type": "string"
           },
+          "agent_kind": {
+            "type": "string"
+          },
           "alias": {
             "type": "string"
           },
@@ -5863,6 +5911,9 @@
             "type": "string"
           },
           "last_active": {
+            "type": "string"
+          },
+          "last_nudge_delivered_at": {
             "type": "string"
           },
           "last_output": {
@@ -6706,6 +6757,7 @@
             "session.crashed": "#/components/schemas/TypedEventStreamEnvelopeSessionCrashed",
             "session.draining": "#/components/schemas/TypedEventStreamEnvelopeSessionDraining",
             "session.idle_killed": "#/components/schemas/TypedEventStreamEnvelopeSessionIdleKilled",
+            "session.max_age_killed": "#/components/schemas/TypedEventStreamEnvelopeSessionMaxAgeKilled",
             "session.quarantined": "#/components/schemas/TypedEventStreamEnvelopeSessionQuarantined",
             "session.stopped": "#/components/schemas/TypedEventStreamEnvelopeSessionStopped",
             "session.suspended": "#/components/schemas/TypedEventStreamEnvelopeSessionSuspended",
@@ -6830,6 +6882,9 @@
           },
           {
             "$ref": "#/components/schemas/TypedEventStreamEnvelopeSessionIdleKilled"
+          },
+          {
+            "$ref": "#/components/schemas/TypedEventStreamEnvelopeSessionMaxAgeKilled"
           },
           {
             "$ref": "#/components/schemas/TypedEventStreamEnvelopeSessionQuarantined"
@@ -7352,6 +7407,7 @@
                 "session.undrained",
                 "session.quarantined",
                 "session.idle_killed",
+                "session.max_age_killed",
                 "session.suspended",
                 "session.updated",
                 "bead.created",
@@ -8426,7 +8482,7 @@
             "type": "string"
           },
           "payload": {
-            "$ref": "#/components/schemas/NoPayload"
+            "$ref": "#/components/schemas/SessionLifecyclePayload"
           },
           "seq": {
             "format": "int64",
@@ -8542,6 +8598,48 @@
         "title": "TypedEventStreamEnvelope session.idle_killed",
         "type": "object"
       },
+      "TypedEventStreamEnvelopeSessionMaxAgeKilled": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/NoPayload"
+          },
+          "seq": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "ts": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "type": {
+            "const": "session.max_age_killed",
+            "type": "string"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/WorkflowEventProjection"
+          }
+        },
+        "required": [
+          "seq",
+          "type",
+          "ts",
+          "actor",
+          "payload"
+        ],
+        "title": "TypedEventStreamEnvelope session.max_age_killed",
+        "type": "object"
+      },
       "TypedEventStreamEnvelopeSessionQuarantined": {
         "additionalProperties": false,
         "properties": {
@@ -8594,7 +8692,7 @@
             "type": "string"
           },
           "payload": {
-            "$ref": "#/components/schemas/NoPayload"
+            "$ref": "#/components/schemas/SessionLifecyclePayload"
           },
           "seq": {
             "format": "int64",
@@ -8878,6 +8976,7 @@
             "session.crashed": "#/components/schemas/TypedTaggedEventStreamEnvelopeSessionCrashed",
             "session.draining": "#/components/schemas/TypedTaggedEventStreamEnvelopeSessionDraining",
             "session.idle_killed": "#/components/schemas/TypedTaggedEventStreamEnvelopeSessionIdleKilled",
+            "session.max_age_killed": "#/components/schemas/TypedTaggedEventStreamEnvelopeSessionMaxAgeKilled",
             "session.quarantined": "#/components/schemas/TypedTaggedEventStreamEnvelopeSessionQuarantined",
             "session.stopped": "#/components/schemas/TypedTaggedEventStreamEnvelopeSessionStopped",
             "session.suspended": "#/components/schemas/TypedTaggedEventStreamEnvelopeSessionSuspended",
@@ -9002,6 +9101,9 @@
           },
           {
             "$ref": "#/components/schemas/TypedTaggedEventStreamEnvelopeSessionIdleKilled"
+          },
+          {
+            "$ref": "#/components/schemas/TypedTaggedEventStreamEnvelopeSessionMaxAgeKilled"
           },
           {
             "$ref": "#/components/schemas/TypedTaggedEventStreamEnvelopeSessionQuarantined"
@@ -9571,6 +9673,7 @@
                 "session.undrained",
                 "session.quarantined",
                 "session.idle_killed",
+                "session.max_age_killed",
                 "session.suspended",
                 "session.updated",
                 "bead.created",
@@ -10745,7 +10848,7 @@
             "type": "string"
           },
           "payload": {
-            "$ref": "#/components/schemas/NoPayload"
+            "$ref": "#/components/schemas/SessionLifecyclePayload"
           },
           "seq": {
             "format": "int64",
@@ -10870,6 +10973,52 @@
         "title": "TypedTaggedEventStreamEnvelope session.idle_killed",
         "type": "object"
       },
+      "TypedTaggedEventStreamEnvelopeSessionMaxAgeKilled": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/NoPayload"
+          },
+          "seq": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "ts": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "type": {
+            "const": "session.max_age_killed",
+            "type": "string"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/WorkflowEventProjection"
+          }
+        },
+        "required": [
+          "seq",
+          "type",
+          "ts",
+          "actor",
+          "payload",
+          "city"
+        ],
+        "title": "TypedTaggedEventStreamEnvelope session.max_age_killed",
+        "type": "object"
+      },
       "TypedTaggedEventStreamEnvelopeSessionQuarantined": {
         "additionalProperties": false,
         "properties": {
@@ -10929,7 +11078,7 @@
             "type": "string"
           },
           "payload": {
-            "$ref": "#/components/schemas/NoPayload"
+            "$ref": "#/components/schemas/SessionLifecyclePayload"
           },
           "seq": {
             "format": "int64",
