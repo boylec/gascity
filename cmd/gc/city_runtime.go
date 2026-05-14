@@ -1520,7 +1520,33 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 	// enqueue (process race during supervisor restart, listener crash).
 	cr.nudgeDispatchTick(ctx)
 
-	// Idle recovery: detect pool sessions stuck at the prompt after
+	// Idle recovery: wake live sessions that hold open assigned work but
+	// were missed by the primary wake path (which only fires for !alive
+	// sessions). See gc-b4z1bl: bd update --assignee on a running session
+	// does not poke the controller, so a reassigned wisp can sit unworked
+	// until something else nudges the session.
+	cr.idleRecoveryTick(ctx)
+}
+
+// idleRecoveryTick scans live sessions for stranded assigned work and
+// enqueues a wake nudge against the queued-nudge dispatcher. See
+// dispatchIdleRecoveryTick for the per-session cooldown contract.
+func (cr *CityRuntime) idleRecoveryTick(ctx context.Context) {
+	if cr == nil || cr.cfg == nil {
+		return
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return
+	}
+	store := cr.cityBeadStore()
+	if store == nil {
+		return
+	}
+	sessionBeads := cr.loadSessionBeadSnapshot()
+	if sessionBeads == nil {
+		return
+	}
+	dispatchIdleRecoveryTick(ctx, cr.cityPath, cr.cfg, store, cr.rigBeadStores(), cr.sp, sessionBeads, time.Now(), cr.stderr)
 }
 
 func filterReleasedAssignedWorkBeads(assignedWorkBeads []beads.Bead, released []releasedPoolAssignment) []beads.Bead {

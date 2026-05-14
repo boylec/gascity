@@ -866,6 +866,16 @@ func TestDrainCheckAcceptsPositionalArg(t *testing.T) {
 	// Verify cobra allows 0 or 1 positional arg (no longer NoArgs).
 	// The command will fail at runtime (no city), but it should NOT fail
 	// with "unknown command" or "accepts 0 arg(s)" errors.
+	//
+	// Force resolveCity() to fail fast: without these the test inherits the
+	// developer's GC_CITY / cwd / Dolt routing, which makes loadCityConfig
+	// open a real managed-dolt connection. That spawn hangs the test
+	// (observed during gc-b4z1bl). Sibling tests already use this isolation;
+	// lift it here too.
+	clearGCEnv(t)
+	clearInheritedCityRoutingEnv(t)
+	disableManagedDoltRecoveryForTest(t)
+	t.Chdir(t.TempDir())
 	var stdout, stderr bytes.Buffer
 	cmd := newRuntimeDrainCheckCmd(&stdout, &stderr)
 	cmd.SilenceErrors = true
