@@ -41,6 +41,7 @@ const (
 	SessionMaxAgeKilled = "session.max_age_killed"
 	SessionSuspended    = "session.suspended"
 	SessionUpdated      = "session.updated"
+	SessionStranded     = "session.stranded"
 	ConvoyCreated       = "convoy.created"
 	ConvoyClosed        = "convoy.closed"
 	ControllerStarted   = "controller.started"
@@ -84,6 +85,7 @@ var KnownEventTypes = []string{
 	SessionWoke, SessionStopped, SessionCrashed,
 	SessionDraining, SessionUndrained, SessionQuarantined,
 	SessionIdleKilled, SessionMaxAgeKilled, SessionSuspended, SessionUpdated,
+	SessionStranded,
 	BeadCreated, BeadClosed, BeadUpdated,
 	MailSent, MailRead, MailArchived, MailMarkedRead, MailMarkedUnread,
 	MailReplied, MailDeleted,
