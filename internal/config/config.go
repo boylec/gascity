@@ -508,6 +508,12 @@ type Rig struct {
 	// shell invocations with BEADS_DOLT_SERVER_PORT=<port> so bd connects to the
 	// correct server instead of the city-level default.
 	DoltPort string `toml:"dolt_port,omitempty"`
+	// FormulaVars provides rig-scoped defaults for formula vars. Keys match
+	// var names declared in formula `[vars.<name>]` blocks. Values are used
+	// when a formula runs in this rig and the caller did not pass an
+	// explicit --var override. Takes precedence over formula-level defaults
+	// but loses to --var flags.
+	FormulaVars map[string]string `toml:"formula_vars,omitempty"`
 }
 
 // AgentOverride modifies a pack-stamped agent for a specific rig.
@@ -545,6 +551,12 @@ type AgentOverride struct {
 	Nudge *string `toml:"nudge,omitempty"`
 	// IdleTimeout overrides the idle timeout duration string (e.g., "30s", "5m", "1h").
 	IdleTimeout *string `toml:"idle_timeout,omitempty"`
+	// MaxSessionAge overrides the max session age. Duration string (e.g., "5h").
+	// Empty disables preemptive restart.
+	MaxSessionAge *string `toml:"max_session_age,omitempty"`
+	// MaxSessionAgeJitter overrides the jitter added on top of MaxSessionAge.
+	// Duration string (e.g., "15m"). Empty disables jitter.
+	MaxSessionAgeJitter *string `toml:"max_session_age_jitter,omitempty"`
 	// SleepAfterIdle overrides idle sleep policy for this agent. Accepts a
 	// duration string (e.g., "30s") or "off".
 	SleepAfterIdle *string `toml:"sleep_after_idle,omitempty"`
@@ -1839,6 +1851,24 @@ type Agent struct {
 	// the controller kills and restarts it. Duration string (e.g., "15m", "1h").
 	// Empty (default) disables idle checking.
 	IdleTimeout string `toml:"idle_timeout,omitempty"`
+	// MaxSessionAge is the maximum wall-clock lifetime of a single runtime
+	// session before the controller preemptively restarts it. Duration string
+	// (e.g., "5h"). Empty (default) disables preemptive restarts. The restart
+	// is idle-gated: sessions with a pending interaction or an in-progress
+	// assigned work bead are left alone until they settle.
+	//
+	// Motivation: provider SDKs that cache credentials at session start (e.g.,
+	// Claude Code via Bedrock) can wedge when the underlying token expires if
+	// the SDK doesn't re-chain providers. Cycling long-running sessions before
+	// the token-expiry window prevents that failure mode without requiring
+	// upstream provider fixes.
+	MaxSessionAge string `toml:"max_session_age,omitempty"`
+	// MaxSessionAgeJitter bounds random jitter added to MaxSessionAge on a
+	// per-session basis so a fleet of identically-configured agents doesn't
+	// synchronize restarts. Duration string (e.g., "15m"). Empty or 0
+	// disables jitter (every session restarts at exactly MaxSessionAge).
+	// Ignored when MaxSessionAge is unset.
+	MaxSessionAgeJitter string `toml:"max_session_age_jitter,omitempty"`
 	// SleepAfterIdle overrides idle sleep policy for this agent. Accepts a
 	// duration string (e.g., "30s") or "off".
 	SleepAfterIdle string `toml:"sleep_after_idle,omitempty"`
@@ -2059,6 +2089,36 @@ func (a *Agent) IdleTimeoutDuration() time.Duration {
 	return d
 }
 
+// MaxSessionAgeDuration returns the maximum session age as a time.Duration.
+// Returns 0 if empty or unparseable (disabled: no preemptive restart).
+func (a *Agent) MaxSessionAgeDuration() time.Duration {
+	if a.MaxSessionAge == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(a.MaxSessionAge)
+	if err != nil {
+		return 0
+	}
+	return d
+}
+
+// MaxSessionAgeJitterDuration returns the jitter bound for max session age
+// as a time.Duration. Returns 0 when the jitter field is empty, unparseable,
+// or when MaxSessionAge itself is disabled.
+func (a *Agent) MaxSessionAgeJitterDuration() time.Duration {
+	if a.MaxSessionAgeDuration() == 0 {
+		return 0
+	}
+	if a.MaxSessionAgeJitter == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(a.MaxSessionAgeJitter)
+	if err != nil || d < 0 {
+		return 0
+	}
+	return d
+}
+
 // EffectiveWakeMode returns the configured wake mode, defaulting to "resume".
 func (a *Agent) EffectiveWakeMode() string {
 	if a.WakeMode == "fresh" {
@@ -2086,6 +2146,13 @@ func (a *Agent) AttachEnabled() bool {
 // Formula roots that are themselves executable must be represented as ready()
 // work (for example type=wisp); molecule containers are not routable demand.
 //
+// Parent epics are excluded from every tier (--exclude-type=epic). An epic
+// has no executable spec — its semantic is "all children done" — so a worker
+// claiming an epic does undefined work (gc-udx). Roles that legitimately
+// process epics (oversight, reviewers, closers) opt in by setting an explicit
+// work_query in their agent config; that custom query is returned unchanged
+// above.
+//
 // When the reconciler runs the query for demand detection (no session
 // context), all identity vars are empty → assignee tiers skip → only
 // the routed_to tier fires to detect new demand.
@@ -2103,13 +2170,13 @@ func (a *Agent) EffectiveWorkQuery() string {
 			// Tier 1: in_progress assigned to any of my identifiers (crash recovery)
 			`for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"; do ` +
 			`[ -z "$id" ] && continue; ` +
-			`r=$(bd list --status in_progress --assignee="$id" --json --limit=1 2>/dev/null); ` +
+			`r=$(bd list --status in_progress --assignee="$id" --exclude-type=epic --json --limit=1 2>/dev/null); ` +
 			`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 			`done; ` +
 			// Tier 2: ready assigned to any of my identifiers (pre-assigned)
 			`for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"; do ` +
 			`[ -z "$id" ] && continue; ` +
-			`r=$(bd ready --assignee="$id" --json --limit=1 2>/dev/null); ` +
+			`r=$(bd ready --assignee="$id" --exclude-type=epic --json --limit=1 2>/dev/null); ` +
 			`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 			`done; ` +
 			// Tier 3: ready unassigned routed to this config (shared routed queue).
@@ -2119,7 +2186,7 @@ func (a *Agent) EffectiveWorkQuery() string {
 			`*) exit 0 ;; ` +
 			`esac; ` +
 			`r=$(bd ready --metadata-field gc.routed_to=` + target +
-			` --unassigned --json --limit=1 2>/dev/null); ` +
+			` --unassigned --exclude-type=epic --json --limit=1 2>/dev/null); ` +
 			`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 			`printf "[]"'`
 	}
@@ -2132,7 +2199,7 @@ func (a *Agent) EffectiveWorkQuery() string {
 		`legacy=""; case "$id" in *control-dispatcher) legacy="${id%control-dispatcher}workflow-control";; esac; ` +
 		`for cand in "$id" "$legacy"; do ` +
 		`[ -z "$cand" ] && continue; ` +
-		`r=$(bd list --status in_progress --assignee="$cand" --json --limit=1 2>/dev/null); ` +
+		`r=$(bd list --status in_progress --assignee="$cand" --exclude-type=epic --json --limit=1 2>/dev/null); ` +
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 		`done; ` +
 		`done; ` +
@@ -2142,7 +2209,7 @@ func (a *Agent) EffectiveWorkQuery() string {
 		`legacy=""; case "$id" in *control-dispatcher) legacy="${id%control-dispatcher}workflow-control";; esac; ` +
 		`for cand in "$id" "$legacy"; do ` +
 		`[ -z "$cand" ] && continue; ` +
-		`r=$(bd ready --assignee="$cand" --json --limit=1 2>/dev/null); ` +
+		`r=$(bd ready --assignee="$cand" --exclude-type=epic --json --limit=1 2>/dev/null); ` +
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 		`done; ` +
 		`done; ` +
@@ -2154,10 +2221,10 @@ func (a *Agent) EffectiveWorkQuery() string {
 		`*) exit 0 ;; ` +
 		`esac; ` +
 		`r=$(bd ready --metadata-field gc.routed_to=` + target +
-		` --unassigned --json --limit=1 2>/dev/null); ` +
+		` --unassigned --exclude-type=epic --json --limit=1 2>/dev/null); ` +
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 		`bd ready --metadata-field gc.routed_to=` + legacyTarget +
-		` --unassigned --json --limit=1 2>/dev/null'`
+		` --unassigned --exclude-type=epic --json --limit=1 2>/dev/null'`
 }
 
 func legacyWorkflowControlQualifiedName(target string) string {
@@ -2277,6 +2344,19 @@ func (a *Agent) SupportsMultipleSessions() bool {
 // SupportsInstanceExpansion reports whether the template may have multiple
 // simultaneously addressable concrete instances and therefore needs instance
 // discovery / synthetic member naming.
+//
+// max_active_sessions=1 has two distinct flavors:
+//
+//   - Pool agents (MinActiveSessions or ScaleCheck set) addressed as
+//     "{name}-1" — they participate in pool semantics even at capacity 1.
+//   - Named-session agents (MaxActiveSessions=1 with a [[named_session]]
+//     entry, no Min/ScaleCheck) addressed as just "{name}" — they have a
+//     stable canonical identity and a phantom "-1" suffix breaks tools that
+//     resolve by qualified name (e.g. refinery).
+//
+// We keep instance expansion on for the pool flavor so existing identities
+// stay stable, and turn it off for the named-session flavor so the bare name
+// resolves correctly.
 func (a *Agent) SupportsInstanceExpansion() bool {
 	if a == nil {
 		return false
@@ -2284,10 +2364,20 @@ func (a *Agent) SupportsInstanceExpansion() bool {
 	if strings.TrimSpace(a.Namepool) != "" || len(a.NamepoolNames) > 0 {
 		return true
 	}
-	if m := a.EffectiveMaxActiveSessions(); m != nil {
-		return *m < 0 || *m > 1
+	m := a.EffectiveMaxActiveSessions()
+	if m == nil {
+		return true
 	}
-	return true
+	if *m < 0 || *m > 1 {
+		return true
+	}
+	// *m == 1: distinguish pool agents (keep numbered instances) from
+	// named-session agents (collapse to base identity). Pool agents are
+	// identified by an explicit MinActiveSessions or a ScaleCheck override.
+	if a.MinActiveSessions != nil || strings.TrimSpace(a.ScaleCheck) != "" {
+		return true
+	}
+	return false
 }
 
 // HasUnlimitedSessionCapacity reports whether max_active_sessions is unbounded.
