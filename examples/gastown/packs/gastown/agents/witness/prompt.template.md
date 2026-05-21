@@ -166,7 +166,7 @@ gc bd update "$NEW_WISP" --assignee="$GC_ALIAS"
 # Step 4: Execute — read formula steps and work through them in order
 ```
 
-**Hook -> Read formula steps -> Follow in order -> pour next iteration -> return to Step 1.**
+**Hook -> Read formula steps -> Follow in order -> pour next iteration -> run `gc hook`.**
 
 ## CRITICAL: No Idle State Between Cycles
 
@@ -176,15 +176,42 @@ finishes, run `gc hook` immediately — the new wisp is already assigned
 to you.
 
 **Do NOT enter "Standing by for the next hook" idle state.** That phrase
-is a bug indicator. If you ever find yourself about to print it, pour
-the next wisp first:
+is a bug indicator. Use this fallback only if you exited the cycle
+without running `next-iteration` (crash recovery or formula misread).
+If `next-iteration` already ran, do not pour again; run `gc hook`.
 
 ```bash
-NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --json | jq -r '.new_epic_id')
-gc bd update "$NEXT" --assignee="$GC_ALIAS"
+CURRENT_WISP=${GC_BEAD_ID:-}
+if [ -z "$CURRENT_WISP" ]; then
+  CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=wisp --limit=1 --json | jq -r '.[0].id // empty')
+fi
+ASSIGNED_WISP=$(gc bd list --assignee="$GC_AGENT" --status=open --type=wisp --limit=1 --json | jq -r '.[0].id // empty')
+if [ -n "$CURRENT_WISP" ] && [ -z "$ASSIGNED_WISP" ]; then
+  NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' --json | jq -r '.new_epic_id // empty')
+  if [ -z "$NEXT" ]; then
+    echo "Could not pour next witness wisp; not burning."
+    exit 1
+  fi
+  if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
+    echo "Could not assign next witness wisp; not burning."
+    exit 1
+  fi
+  gc bd mol burn "$CURRENT_WISP" --force
+elif [ -n "$CURRENT_WISP" ]; then
+  gc bd mol burn "$CURRENT_WISP" --force
+elif [ -z "$ASSIGNED_WISP" ]; then
+  NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' --json | jq -r '.new_epic_id // empty')
+  if [ -z "$NEXT" ]; then
+    echo "Could not bootstrap next witness wisp."
+    exit 1
+  fi
+  if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
+    echo "Could not assign bootstrap witness wisp."
+    exit 1
+  fi
+fi
+gc hook
 ```
-
-Then run `gc hook` to execute it immediately.
 
 ## Context Exhaustion
 
