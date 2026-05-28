@@ -1,6 +1,7 @@
 package beads_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -504,7 +505,7 @@ func TestFileStoreRefreshesSameSizeExternalRewrite(t *testing.T) {
 	}
 
 	beforeLen := len(f.Files[path])
-	updatedTitle := updateTitleKeepingFileSize(t, s1, f, path, created.ID, beforeLen)
+	updatedTitle := updateTitleKeepingFileSize(t, f, path, created.ID, beforeLen)
 	afterLen := len(f.Files[path])
 	if beforeLen != afterLen {
 		t.Fatalf("expected same-size rewrite, got %d -> %d bytes", beforeLen, afterLen)
@@ -538,10 +539,6 @@ func TestFileStoreMutatorReloadsSameSizeExternalRewriteWithUnchangedFreshness(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer, err := beads.OpenFileStore(f, path)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	created, err := stale.Create(beads.Bead{Title: strings.Repeat("a", 32)})
 	if err != nil {
@@ -550,7 +547,7 @@ func TestFileStoreMutatorReloadsSameSizeExternalRewriteWithUnchangedFreshness(t 
 	originalModTime := f.ModTimes[path]
 	originalLen := len(f.Files[path])
 
-	updatedTitle := updateTitleKeepingFileSize(t, writer, f, path, created.ID, originalLen)
+	updatedTitle := updateTitleKeepingFileSize(t, f, path, created.ID, originalLen)
 	if gotLen := len(f.Files[path]); gotLen != originalLen {
 		t.Fatalf("expected same-size external rewrite, got %d -> %d bytes", originalLen, gotLen)
 	}
@@ -576,19 +573,48 @@ func TestFileStoreMutatorReloadsSameSizeExternalRewriteWithUnchangedFreshness(t 
 	}
 }
 
-func updateTitleKeepingFileSize(t *testing.T, store beads.Store, f *fsys.Fake, path, id string, targetLen int) string {
+type fileStoreTestData struct {
+	Seq   int          `json:"seq"`
+	Beads []beads.Bead `json:"beads"`
+	Deps  []beads.Dep  `json:"deps,omitempty"`
+}
+
+func updateTitleKeepingFileSize(t *testing.T, f *fsys.Fake, path, id string, targetLen int) string {
 	t.Helper()
-	for pad := 0; pad <= 64; pad++ {
-		title := "bravo" + strings.Repeat("x", pad)
-		if err := store.Update(id, beads.UpdateOpts{Title: &title}); err != nil {
-			t.Fatalf("Update(%q) to same-size title: %v", id, err)
-		}
-		if len(f.Files[path]) == targetLen {
-			return title
-		}
+	var fd fileStoreTestData
+	if err := json.Unmarshal(f.Files[path], &fd); err != nil {
+		t.Fatalf("decode file store JSON: %v", err)
 	}
-	t.Fatalf("could not produce same-size rewrite for %s: target=%d last=%d", path, targetLen, len(f.Files[path]))
+
+	for i := range fd.Beads {
+		if fd.Beads[i].ID != id {
+			continue
+		}
+		oldTitle := fd.Beads[i].Title
+		title := sameLengthTitle(oldTitle)
+		fd.Beads[i].Title = title
+		data, err := json.MarshalIndent(fd, "", "  ")
+		if err != nil {
+			t.Fatalf("encode file store JSON: %v", err)
+		}
+		if len(data) != targetLen {
+			t.Fatalf("same-size title rewrite changed %s size: target=%d got=%d", path, targetLen, len(data))
+		}
+		if err := f.WriteFile(path, data, 0o644); err != nil {
+			t.Fatalf("write same-size title rewrite: %v", err)
+		}
+		return title
+	}
+
+	t.Fatalf("bead %q not found in %s", id, path)
 	return ""
+}
+
+func sameLengthTitle(oldTitle string) string {
+	if len(oldTitle) < len("bravo") {
+		return strings.Repeat("b", len(oldTitle))
+	}
+	return "bravo" + strings.Repeat("x", len(oldTitle)-len("bravo"))
 }
 
 func TestFileStoreRefreshFallbackReloadsWhenStatFails(t *testing.T) {
