@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gc mail count --json` always include the resolved `recipients` array,
   including single-recipient targets.
 
+### Changed
+
+- The built-in Claude provider's `model = "opus"` option now emits
+  `claude-opus-4-8` (was `claude-opus-4-7`). Cities that rely on the `opus`
+  alias should expect the new model target after upgrading. The pricing
+  defaults gain a `claude-opus-4-8` entry; the existing `claude-opus-4-7`
+  entry is retained so cost attribution on historical sessions still
+  resolves.
+
 ### Fixed
 
 - `gc --json-schema` manifest output no longer includes the removed

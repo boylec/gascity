@@ -253,7 +253,7 @@ func TestTitleModelFlagArgs(t *testing.T) {
 			{
 				Key: "model",
 				Choices: []config.OptionChoice{
-					{Value: "opus", FlagArgs: []string{"--model", "claude-opus-4-7"}},
+					{Value: "opus", FlagArgs: []string{"--model", "claude-opus-4-8"}},
 					{Value: "haiku", FlagArgs: []string{"--model", "claude-haiku-4-5-20251001"}},
 				},
 			},

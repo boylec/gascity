@@ -330,7 +330,7 @@ func TestResolveExplicitOptions_OnlyExplicit(t *testing.T) {
 			Default: "",
 			Choices: []OptionChoice{
 				{Value: "", Label: "Default", FlagArgs: nil},
-				{Value: "opus", Label: "Opus", FlagArgs: []string{"--model", "claude-opus-4-7"}},
+				{Value: "opus", Label: "Opus", FlagArgs: []string{"--model", "claude-opus-4-8"}},
 			},
 		},
 	}
@@ -493,7 +493,7 @@ func TestResolveExplicitOptions_SubsetOfOptions(t *testing.T) {
 			Default: "",
 			Choices: []OptionChoice{
 				{Value: "", Label: "Default", FlagArgs: nil},
-				{Value: "opus", Label: "Opus", FlagArgs: []string{"--model", "claude-opus-4-7"}},
+				{Value: "opus", Label: "Opus", FlagArgs: []string{"--model", "claude-opus-4-8"}},
 			},
 		},
 	}
@@ -505,7 +505,7 @@ func TestResolveExplicitOptions_SubsetOfOptions(t *testing.T) {
 	}
 
 	// Should only return model flags, not permission_mode defaults.
-	wantArgs := []string{"--model", "claude-opus-4-7"}
+	wantArgs := []string{"--model", "claude-opus-4-8"}
 	if len(args) != len(wantArgs) {
 		t.Fatalf("got args=%v, want %v", args, wantArgs)
 	}

@@ -87,6 +87,18 @@ var claudeDefaults = []ModelPricing{
 			CacheCreationUSDPer1M: 3.75,
 		},
 	},
+	// Claude 4.8 Opus.
+	{
+		Provider:     "claude",
+		Model:        "claude-opus-4-8",
+		LastVerified: "2026-05-28",
+		Tier: Tier{
+			PromptUSDPer1M:        5.00,
+			CompletionUSDPer1M:    25.00,
+			CacheReadUSDPer1M:     0.50,
+			CacheCreationUSDPer1M: 6.25,
+		},
+	},
 	// Claude 4.7 Opus.
 	{
 		Provider:     "claude",
