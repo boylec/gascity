@@ -189,6 +189,15 @@ func sessionStartRequested(session beads.Bead, clk clock.Clock) bool {
 // reached preWakeCommit use pendingCreateNeverStartedTimeout instead.
 const staleCreatingStateTimeout = time.Minute
 
+// stalePendingCreateTimeout is the longer grace window applied by
+// reapStaleSessionBeads to beads still holding pending_create_claim=true. A
+// pending-create bead may legitimately be mid-start or mid-rollback, so it is
+// given more time than a plain creating bead before being reaped. Without an
+// upper bound, a bead whose rollback never completes (e.g. a transient store
+// error on closeBead) would stay open as a phantom forever — the leak tracked
+// by gc-5tyf5.
+const stalePendingCreateTimeout = 5 * time.Minute
+
 func sessionMetadataState(session beads.Bead) string {
 	switch state := strings.TrimSpace(session.Metadata["state"]); state {
 	case "awake":

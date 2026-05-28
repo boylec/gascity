@@ -5211,8 +5211,9 @@ func TestReapStaleSessionBeads(t *testing.T) {
 	// is deterministic regardless of wall-clock latency.
 	type clockMode int
 	const (
-		clockPastGrace   clockMode = iota // 2 min past bead creation
-		clockWithinGrace                  // 30s past bead creation
+		clockPastGrace        clockMode = iota // 2 min past bead creation
+		clockWithinGrace                       // 30s past bead creation
+		clockPastPendingGrace                  // 6 min past bead creation
 	)
 
 	tests := []struct {
@@ -5241,7 +5242,12 @@ func TestReapStaleSessionBeads(t *testing.T) {
 			wantOpen:   0,
 		},
 		{
-			name: "pending_create_creating_kept",
+			name: "pending_create_creating_within_pending_grace_kept",
+			// A pending_create bead survives the normal creating-state
+			// timeout: the reconciler may still be retrying the start or its
+			// rollback, so it gets the longer stalePendingCreateTimeout window
+			// (clockPastGrace is 2 min, past the 1-min creating timeout but
+			// within the longer pending-create grace).
 			beads: []beads.Bead{{
 				Title:  "worker",
 				Type:   sessionBeadType,
@@ -5256,6 +5262,27 @@ func TestReapStaleSessionBeads(t *testing.T) {
 			clock:      clockPastGrace,
 			wantReaped: 0,
 			wantOpen:   1,
+		},
+		{
+			name: "pending_create_creating_past_pending_grace_reaped",
+			// gc-5tyf5: the phantom-accumulation leak. A pool bead stuck in
+			// creating with pending_create_claim=true and a dead tmux (e.g. a
+			// failed rollback) must eventually be reaped once it is past the
+			// longer pending-create grace, instead of leaking forever.
+			beads: []beads.Bead{{
+				Title:  "worker",
+				Type:   sessionBeadType,
+				Labels: []string{sessionBeadLabel},
+				Metadata: map[string]string{
+					"session_name":         "worker-1",
+					"state":                "creating",
+					"pending_create_claim": "true",
+				},
+			}},
+			running:    nil,
+			clock:      clockPastPendingGrace,
+			wantReaped: 1,
+			wantOpen:   0,
 		},
 		{
 			name: "pending_create_active_kept",
@@ -5489,6 +5516,8 @@ func TestReapStaleSessionBeads(t *testing.T) {
 				clk = &clock.Fake{Time: firstCreatedAt.Add(2 * time.Minute)}
 			case clockWithinGrace:
 				clk = &clock.Fake{Time: firstCreatedAt.Add(30 * time.Second)}
+			case clockPastPendingGrace:
+				clk = &clock.Fake{Time: firstCreatedAt.Add(6 * time.Minute)}
 			}
 
 			// Set up drain tracker with draining beads.
