@@ -1834,20 +1834,36 @@ func reapStaleSessionBeads(
 		// timeout. Use the latest known start boundary, not just CreatedAt,
 		// because a long-lived bead may have been woken moments ago.
 		// Zero CreatedAt means unknown age — skip conservatively.
-		//
-		// pending_create beads get the longer stalePendingCreateTimeout window
-		// because the reconciler may still be retrying their start or rollback;
-		// they are only reaped once they have leaked past that grace.
 		startedAt, ok := staleReapStartBoundary(b)
 		if !ok {
 			continue
 		}
-		grace := staleCreatingStateTimeout
-		if strings.TrimSpace(b.Metadata["pending_create_claim"]) == "true" {
-			grace = stalePendingCreateTimeout
-		}
-		if now.Sub(startedAt) < grace {
-			continue
+		pendingCreate := strings.TrimSpace(b.Metadata["pending_create_claim"]) == "true"
+		// Never-started pending creates (pending_create_claim=true with no
+		// last_woke_at) have not reached preWakeCommit, so their start may
+		// still be in flight behind a busy pool start queue. Defer entirely to
+		// the reconciler's authoritative never-started lease
+		// (pendingCreateNeverStartedTimeout, 10m) rather than the shorter
+		// stalePendingCreateTimeout: reaping mid-start would close the bead out
+		// from under an active lease and let the reconciler spawn a replacement
+		// that double-binds the same tmux session name. Once that lease
+		// expires the phantom is still reaped (gc-5tyf5), just later.
+		if pendingCreate && strings.TrimSpace(b.Metadata["last_woke_at"]) == "" {
+			if !pendingCreateNeverStartedLeaseExpired(b, clk) {
+				continue
+			}
+		} else {
+			// Started (reached preWakeCommit) pending creates get the longer
+			// stalePendingCreateTimeout window because the reconciler may still
+			// be retrying their start or rollback; plain creating beads use the
+			// short staleCreatingStateTimeout.
+			grace := staleCreatingStateTimeout
+			if pendingCreate {
+				grace = stalePendingCreateTimeout
+			}
+			if now.Sub(startedAt) < grace {
+				continue
+			}
 		}
 		if closeBead(store, b.ID, "stale-session", now.UTC(), stderr) {
 			fmt.Fprintf(stderr, "WARN: reconciler: reaped stuck-creating session bead %s — tmux session %q not found\n", b.ID, sn) //nolint:errcheck
