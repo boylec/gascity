@@ -4689,3 +4689,157 @@ func TestRecordQueuedNudgeFailureDetailedClosesOnlyOwnedStore(t *testing.T) {
 		t.Fatalf("caller-owned store closed %d times, want 0 (helper must not close a passed-in store)", passedCloses)
 	}
 }
+
+// writeCountingNudgeStore counts the SetMetadataBatch and Close calls that
+// reach the backing store, so tests can assert that idempotent terminalization
+// performs no redundant writes. Each SetMetadataBatch that reaches the backing
+// store is one Dolt commit in the deployed binary.
+type writeCountingNudgeStore struct {
+	*beads.MemStore
+	setMetadataBatchCalls int
+	closeCalls            int
+}
+
+func (s *writeCountingNudgeStore) SetMetadataBatch(id string, kvs map[string]string) error {
+	s.setMetadataBatchCalls++
+	return s.MemStore.SetMetadataBatch(id, kvs)
+}
+
+func (s *writeCountingNudgeStore) Close(id string) error {
+	s.closeCalls++
+	return s.MemStore.Close(id)
+}
+
+// TestMarkQueuedNudgeTerminalIdempotentForTerminalBead is the hq-fh3bk
+// regression: once a nudge bead is terminalized (closed, terminal state,
+// terminal_at stamped), re-running markQueuedNudgeTerminal for the same state
+// must not write again. In the deployed binary every redundant
+// SetMetadataBatch is one Dolt commit of pure bloat — a single dead nudge bead
+// (hq-kpqt) accreted 21,819 such commits, ~22% of the hq Dolt history, because
+// reconciliation/dispatch paths revisited it on every tick through a
+// non-caching store that has no no-op-write guard of its own.
+func TestMarkQueuedNudgeTerminalIdempotentForTerminalBead(t *testing.T) {
+	store := &writeCountingNudgeStore{MemStore: beads.NewMemStore()}
+	item := queuedNudge{
+		ID:        "nudge-zombie",
+		Agent:     "vessel-network.nux",
+		SessionID: "hq-uweo",
+		Source:    "session",
+		Message:   "follow up",
+		CreatedAt: time.Now().Add(-time.Hour).UTC(),
+	}
+	createdID, _, err := ensureQueuedNudgeBead(store, item)
+	if err != nil {
+		t.Fatalf("ensureQueuedNudgeBead: %v", err)
+	}
+	item.BeadID = createdID
+	item.LastError = "session is closed: hq-uweo"
+
+	// First terminalization writes once: SetMetadataBatch + Close.
+	if err := markQueuedNudgeTerminal(store, item, "failed", item.LastError, "", time.Now().UTC()); err != nil {
+		t.Fatalf("markQueuedNudgeTerminal (first): %v", err)
+	}
+	writesAfterFirst := store.setMetadataBatchCalls
+	closesAfterFirst := store.closeCalls
+	if writesAfterFirst == 0 {
+		t.Fatal("first terminalization performed no metadata write; expected exactly one")
+	}
+
+	terminalBead, err := store.Get(createdID)
+	if err != nil {
+		t.Fatalf("Get(%q): %v", createdID, err)
+	}
+	if terminalBead.Status != "closed" || terminalBead.Metadata["state"] != "failed" {
+		t.Fatalf("after first terminalization: status=%q state=%q, want closed/failed", terminalBead.Status, terminalBead.Metadata["state"])
+	}
+	firstUpdatedAt := terminalBead.UpdatedAt
+
+	// Subsequent terminalization passes for the same terminal state — the loop
+	// that bloated Dolt. None may reach the backing store.
+	for i := 0; i < 5; i++ {
+		// A fresh now each pass mirrors the daemon recomputing terminal_at; the
+		// guard must not be defeated by the changing timestamp.
+		if err := markQueuedNudgeTerminal(store, item, "failed", item.LastError, "", time.Now().UTC()); err != nil {
+			t.Fatalf("markQueuedNudgeTerminal (repeat %d): %v", i, err)
+		}
+	}
+	if store.setMetadataBatchCalls != writesAfterFirst {
+		t.Fatalf("SetMetadataBatch calls = %d after repeats, want %d (terminal bead was rewritten — Dolt-commit bloat)", store.setMetadataBatchCalls, writesAfterFirst)
+	}
+	if store.closeCalls != closesAfterFirst {
+		t.Fatalf("Close calls = %d after repeats, want %d (terminal bead re-closed)", store.closeCalls, closesAfterFirst)
+	}
+
+	// updated_at must not advance: the literal bloat signature in hq-fh3bk was
+	// "only bumped updated_at, data otherwise identical".
+	again, err := store.Get(createdID)
+	if err != nil {
+		t.Fatalf("Get(%q) after repeats: %v", createdID, err)
+	}
+	if !again.UpdatedAt.Equal(firstUpdatedAt) {
+		t.Fatalf("updated_at advanced from %s to %s on a no-op terminalization", firstUpdatedAt, again.UpdatedAt)
+	}
+}
+
+// TestMarkQueuedNudgeTerminalWritesGenuineTransitions pins that the
+// idempotence guard is precise: it suppresses only redundant same-state
+// terminalization. A still-open (queued) bead and a different terminal state
+// must each still write, so a real transition is never silently dropped.
+func TestMarkQueuedNudgeTerminalWritesGenuineTransitions(t *testing.T) {
+	t.Run("open_bead_is_terminalized", func(t *testing.T) {
+		store := &writeCountingNudgeStore{MemStore: beads.NewMemStore()}
+		item := queuedNudge{
+			ID:        "nudge-open",
+			Agent:     "worker",
+			Source:    "session",
+			Message:   "follow up",
+			CreatedAt: time.Now().Add(-time.Minute).UTC(),
+		}
+		createdID, _, err := ensureQueuedNudgeBead(store, item)
+		if err != nil {
+			t.Fatalf("ensureQueuedNudgeBead: %v", err)
+		}
+		item.BeadID = createdID
+		if err := markQueuedNudgeTerminal(store, item, "failed", "boom", "", time.Now().UTC()); err != nil {
+			t.Fatalf("markQueuedNudgeTerminal: %v", err)
+		}
+		if store.setMetadataBatchCalls != 1 {
+			t.Fatalf("SetMetadataBatch calls = %d, want 1 (open queued bead must be written)", store.setMetadataBatchCalls)
+		}
+	})
+
+	t.Run("different_terminal_state_rewrites", func(t *testing.T) {
+		store := &writeCountingNudgeStore{MemStore: beads.NewMemStore()}
+		item := queuedNudge{
+			ID:        "nudge-restate",
+			Agent:     "worker",
+			Source:    "session",
+			Message:   "follow up",
+			CreatedAt: time.Now().Add(-time.Minute).UTC(),
+		}
+		createdID, _, err := ensureQueuedNudgeBead(store, item)
+		if err != nil {
+			t.Fatalf("ensureQueuedNudgeBead: %v", err)
+		}
+		item.BeadID = createdID
+		if err := markQueuedNudgeTerminal(store, item, "failed", "boom", "", time.Now().UTC()); err != nil {
+			t.Fatalf("markQueuedNudgeTerminal (failed): %v", err)
+		}
+		writesAfterFailed := store.setMetadataBatchCalls
+		// A different terminal state is a genuine transition and must write,
+		// even though the bead is already closed.
+		if err := markQueuedNudgeTerminal(store, item, "superseded", "superseded", "", time.Now().UTC()); err != nil {
+			t.Fatalf("markQueuedNudgeTerminal (superseded): %v", err)
+		}
+		if store.setMetadataBatchCalls != writesAfterFailed+1 {
+			t.Fatalf("SetMetadataBatch calls = %d, want %d (state change failed->superseded must write)", store.setMetadataBatchCalls, writesAfterFailed+1)
+		}
+		got, err := store.Get(createdID)
+		if err != nil {
+			t.Fatalf("Get(%q): %v", createdID, err)
+		}
+		if got.Metadata["state"] != "superseded" {
+			t.Fatalf("state = %q, want superseded after genuine transition", got.Metadata["state"])
+		}
+	})
+}

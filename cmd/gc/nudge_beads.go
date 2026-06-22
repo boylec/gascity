@@ -157,6 +157,23 @@ func markQueuedNudgeTerminal(store beads.Store, item queuedNudge, state, reason,
 		if beadID == "" {
 			return beads.ErrNotFound
 		}
+		// Idempotence guard: a nudge bead that is already closed and already
+		// in the requested terminal state (with terminal_at stamped) is fully
+		// dead — re-stamping it only bumps updated_at, which costs one Dolt
+		// commit per call with no data change. Reconciliation paths
+		// (pruneDeadQueuedNudges repair, dead-letter, supersede, expiry) and
+		// the supervisor dispatch tick can revisit the same dead bead on every
+		// pass; without this skip a single zombie nudge accreted >21k identical
+		// commits (~22% of the hq Dolt history). bd's Close is already a no-op
+		// on closed beads, but SetMetadataBatch is not, so the guard must cover
+		// the metadata write too. See hq-fh3bk.
+		if existing, err := store.Get(beadID); err == nil {
+			if nudgeBeadAlreadyTerminal(existing, state) {
+				return nil
+			}
+		} else if isMissingQueuedNudgeBeadErr(err, beadID) {
+			return beads.ErrNotFound
+		}
 		if err := store.SetMetadataBatch(beadID, update); err != nil {
 			if isMissingQueuedNudgeBeadErr(err, beadID) {
 				return beads.ErrNotFound
@@ -189,6 +206,30 @@ func markQueuedNudgeTerminal(store beads.Store, item queuedNudge, state, reason,
 		return err
 	}
 	return nil
+}
+
+// nudgeBeadAlreadyTerminal reports whether a backing nudge bead is already
+// fully terminalized for the requested terminal state, so markQueuedNudgeTerminal
+// can skip a redundant write. The bead must be closed, already carry the same
+// terminal state code, and have terminal_at stamped. The exact terminal_at
+// timestamp is intentionally NOT compared — each call computes a fresh now, so
+// comparing it would never match and would defeat the guard; any non-empty
+// terminal_at means a prior pass already recorded the terminal boundary.
+//
+// requestedState must itself be a recognized terminal state; an unknown code
+// falls through to a normal write so callers cannot accidentally suppress a
+// real transition.
+func nudgeBeadAlreadyTerminal(b beads.Bead, requestedState string) bool {
+	if !isTerminalNudgeState(requestedState) {
+		return false
+	}
+	if b.Status != "closed" {
+		return false
+	}
+	if b.Metadata["state"] != requestedState {
+		return false
+	}
+	return strings.TrimSpace(b.Metadata["terminal_at"]) != ""
 }
 
 // nudgeCanonicalCloseReason maps a nudge queue terminalization state code
