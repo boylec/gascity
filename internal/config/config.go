@@ -1379,6 +1379,19 @@ func (p BeadPolicyConfig) DeleteAfterCloseDuration() time.Duration {
 // loop cannot spin faster than the storm-protection backstops can observe.
 const ProgressStallTimeoutMinimum = 5 * time.Minute
 
+// AssignedWorkStallTimeoutDefault is the default grace before a live session
+// that holds ready, assigned, unclaimed work but shows no provider activity is
+// recycled with a fresh restart. Unlike the general progress-stall recycler
+// (which is opt-in via progress_stall_timeout), this narrow case is enabled by
+// default: a session with work routed specifically to it that it has not
+// claimed and is not progressing on is genuinely stuck — no pool sibling can
+// serve the assignment, and nudges cannot rouse a wedged prompt — so the only
+// recovery is a fresh process. The default is comfortably above any legitimate
+// post-wake startup window (cities run startup_timeout in the 60s–300s range)
+// so a freshly-woken session that is still coming up is never recycled. Set
+// [session] assigned_work_stall_timeout to "off"/"0" to disable or raise it.
+const AssignedWorkStallTimeoutDefault = 10 * time.Minute
+
 // SessionConfig holds session provider settings.
 type SessionConfig struct {
 	// Provider selects the session backend: "fake", "fail", "subprocess",
@@ -1417,6 +1430,17 @@ type SessionConfig struct {
 	// alive-idle period for the city; values below 5m are clamped to 5m.
 	// Duration string (e.g. "30m"). Unset/zero disables it.
 	ProgressStallTimeout string `toml:"progress_stall_timeout,omitempty"`
+	// AssignedWorkStallTimeout bounds how long a live session may hold ready,
+	// assigned, unclaimed work without provider activity before it is recycled
+	// with a fresh restart. This is the narrow, on-by-default counterpart to
+	// progress_stall_timeout: it fires only for sessions that have work routed
+	// specifically to them (which no pool sibling can serve) that they have not
+	// claimed and are not progressing on — the parked-persistent-agent failure
+	// mode where nudges cannot rouse a wedged prompt. Empty uses
+	// AssignedWorkStallTimeoutDefault (10m); "off"/"0"/negative disables it;
+	// positive values below 5m are clamped to 5m.
+	// Duration string (e.g. "10m").
+	AssignedWorkStallTimeout string `toml:"assigned_work_stall_timeout,omitempty"`
 	// Socket specifies the tmux socket name for per-city isolation.
 	// When set, all tmux commands use "tmux -L <socket>" to connect to
 	// a dedicated server. When empty, defaults to the city name
@@ -1510,6 +1534,31 @@ func (s *SessionConfig) ProgressStallTimeoutDuration() time.Duration {
 		return 0
 	}
 	if d <= 0 {
+		return 0
+	}
+	if d < ProgressStallTimeoutMinimum {
+		return ProgressStallTimeoutMinimum
+	}
+	return d
+}
+
+// AssignedWorkStallTimeoutDuration returns the grace before a live session
+// holding ready, assigned, unclaimed work with no provider activity is
+// recycled. An empty value uses AssignedWorkStallTimeoutDefault (10m), so the
+// guard is on by default. An explicit "off", a non-positive duration, or an
+// unparseable value disables it (returns 0). Positive values below
+// ProgressStallTimeoutMinimum are clamped to that floor so the recycler cannot
+// spin faster than the storm-protection backstops can observe.
+func (s *SessionConfig) AssignedWorkStallTimeoutDuration() time.Duration {
+	raw := strings.TrimSpace(s.AssignedWorkStallTimeout)
+	if raw == "" {
+		return AssignedWorkStallTimeoutDefault
+	}
+	if strings.EqualFold(raw, "off") {
+		return 0
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
 		return 0
 	}
 	if d < ProgressStallTimeoutMinimum {

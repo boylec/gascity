@@ -94,6 +94,7 @@ const (
 	TraceSiteReconcilerIdleTimeout          TraceSiteCode = "reconciler.session.idle_timeout"
 	TraceSiteReconcilerResetStalled         TraceSiteCode = "reconciler.session.reset_stalled"
 	TraceSiteReconcilerProgressStallExempt  TraceSiteCode = "reconciler.session.progress_stall_exempt"
+	TraceSiteReconcilerProgressStall        TraceSiteCode = "reconciler.session.progress_stall"
 	TraceSiteReconcilerWakeDecision         TraceSiteCode = "reconciler.session.wake_decision"
 	TraceSiteReconcilerDrainDecision        TraceSiteCode = "reconciler.session.drain"
 	TraceSiteDrainStale                     TraceSiteCode = "reconciler.drain.stale"
@@ -589,6 +590,7 @@ func normalizeTraceSiteCode(raw string) (TraceSiteCode, string) {
 		TraceSiteReconcilerIdleTimeout,
 		TraceSiteReconcilerResetStalled,
 		TraceSiteReconcilerProgressStallExempt,
+		TraceSiteReconcilerProgressStall,
 		TraceSiteReconcilerWakeDecision,
 		TraceSiteReconcilerDrainDecision,
 		TraceSiteDrainStale,

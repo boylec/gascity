@@ -26,3 +26,28 @@ func TestProgressStallTimeoutDuration(t *testing.T) {
 		})
 	}
 }
+
+func TestAssignedWorkStallTimeoutDuration(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  time.Duration
+	}{
+		{"unset uses default (on)", "", AssignedWorkStallTimeoutDefault},
+		{"off disables (zero)", "off", 0},
+		{"OFF case-insensitive disables", "OFF", 0},
+		{"valid duration", "15m", 15 * time.Minute},
+		{"too small clamps to safety floor", "30s", ProgressStallTimeoutMinimum},
+		{"unparseable disables (zero)", "not-a-duration", 0},
+		{"negative disables (zero)", "-5m", 0},
+		{"zero disables (zero)", "0s", 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &SessionConfig{AssignedWorkStallTimeout: tc.value}
+			if got := s.AssignedWorkStallTimeoutDuration(); got != tc.want {
+				t.Errorf("AssignedWorkStallTimeoutDuration(%q) = %v, want %v", tc.value, got, tc.want)
+			}
+		})
+	}
+}

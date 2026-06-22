@@ -2630,6 +2630,10 @@
           "type": "string",
           "description": "ProgressStallTimeout, when set, enables progress-aware session recycling:\na desired, alive, claim-less session on a healthy provider whose last\nprovider-reported activity is older than this duration is restarted fresh.\nSuch a session has likely parked (e.g. its turn ended on a provider auth\nerror) and will not self-recover. Set this above the longest legitimate\nalive-idle period for the city; values below 5m are clamped to 5m.\nDuration string (e.g. \"30m\"). Unset/zero disables it."
         },
+        "assigned_work_stall_timeout": {
+          "type": "string",
+          "description": "AssignedWorkStallTimeout bounds how long a live session may hold ready,\nassigned, unclaimed work without provider activity before it is recycled\nwith a fresh restart. This is the narrow, on-by-default counterpart to\nprogress_stall_timeout: it fires only for sessions that have work routed\nspecifically to them (which no pool sibling can serve) that they have not\nclaimed and are not progressing on — the parked-persistent-agent failure\nmode where nudges cannot rouse a wedged prompt. Empty uses\nAssignedWorkStallTimeoutDefault (10m); \"off\"/\"0\"/negative disables it;\npositive values below 5m are clamped to 5m.\nDuration string (e.g. \"10m\")."
+        },
         "socket": {
           "type": "string",
           "description": "Socket specifies the tmux socket name for per-city isolation.\nWhen set, all tmux commands use \"tmux -L \u003csocket\u003e\" to connect to\na dedicated server. When empty, defaults to the city name\n(workspace.name) — giving every city its own tmux server\nautomatically. Set explicitly to override."

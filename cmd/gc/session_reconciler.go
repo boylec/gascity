@@ -1108,6 +1108,19 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 		}
 		rollbackPendingCreate(session, store, clk.Now().UTC(), stderr)
 	}
+	// Cheap in-memory index of which assignee identifiers have any assigned work
+	// this tick, built from the pre-fetched assignedWorkBeads (no extra I/O). The
+	// assigned-work-stall recycler (on by default) uses this to skip the
+	// provider GetLastActivity probe entirely for the common case of an alive,
+	// healthy session with no assigned work — preserving the desired fast path's
+	// zero-provider-call invariant. Sessions that DO have assigned work fall
+	// through to the authoritative ready/reachable query inside the block.
+	assignedWorkAssignees := make(map[string]bool, len(assignedWorkBeads))
+	for i := range assignedWorkBeads {
+		if a := strings.TrimSpace(assignedWorkBeads[i].Assignee); a != "" {
+			assignedWorkAssignees[a] = true
+		}
+	}
 	phaseStart = time.Now()
 	for i := range ordered {
 		if ctx != nil && ctx.Err() != nil {
@@ -1573,19 +1586,55 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 
 		// Progress-aware recycle (ADR-0013 Amendment A1, move 3b): a desired,
 		// alive session that has stopped progressing has likely parked (e.g. its
-		// turn ended on a provider auth error) and will not self-recover. Opt-in
-		// via [session] progress_stall_timeout; disabled (zero) by default, so
-		// this is a no-op unless a city sets a threshold above its agents'
-		// longest legitimate alive-idle period. The cheap time check gates the
-		// store/health queries so they run only for the rare already-stalled
-		// session. Set the restart_requested marker and let the block below
-		// perform the fresh-restart handoff.
-		if threshold := cfg.Session.ProgressStallTimeoutDuration(); threshold > 0 && alive && sessionActivityReportable(sp, name) {
+		// turn ended on a provider auth error) and will not self-recover.
+		//
+		// Two thresholds drive this. The general progress-stall recycler is
+		// opt-in via [session] progress_stall_timeout (disabled/zero by default),
+		// so it is a no-op unless a city sets a threshold above its agents'
+		// longest legitimate alive-idle period. The narrower assigned-work-stall
+		// guard ([session] assigned_work_stall_timeout, on by default) fires only
+		// for a session that holds READY, assigned, UNCLAIMED work — work routed
+		// specifically to it that no pool sibling can serve — and is not
+		// progressing on it. That is the parked-persistent-agent failure mode
+		// (hq-u9qv6): the agent ran an idle scan, parked at its prompt, then work
+		// was routed to it AFTER the scan; nudges/`gc session wake`/pin-keep-awake
+		// cannot rouse a wedged prompt, so only a fresh process recovers it. The
+		// cheap time check gates the store/health queries so they run only for
+		// the rare already-stalled session. Set the restart_requested marker and
+		// let the block below perform the fresh-restart handoff.
+		progressThreshold := cfg.Session.ProgressStallTimeoutDuration()
+		assignedThreshold := cfg.Session.AssignedWorkStallTimeoutDuration()
+		// Cheap pre-gate for the on-by-default assigned-work-stall path: only the
+		// general progress-stall recycler (opt-in) probes activity for every
+		// session; the assigned-work path probes only sessions that this tick's
+		// pre-fetched work index already shows hold assigned work. This keeps the
+		// desired fast path free of per-tick provider GetLastActivity calls for
+		// healthy sessions with no assigned work.
+		assignedWorkStallApplies := false
+		if assignedThreshold > 0 && len(assignedWorkAssignees) > 0 {
+			for _, id := range sessionAssignmentIdentifiersForConfig(*session, cfg) {
+				if assignedWorkAssignees[id] {
+					assignedWorkStallApplies = true
+					break
+				}
+			}
+		}
+		if (progressThreshold > 0 || assignedWorkStallApplies) && alive && sessionActivityReportable(sp, name) {
 			lastActivity, lastActivityErr := sp.GetLastActivity(name)
 			if lastActivityErr != nil {
 				fmt.Fprintf(stderr, "session reconciler: reading last activity before progress-stall recycle for %s: %v\n", name, lastActivityErr) //nolint:errcheck
 			}
-			if lastActivityErr == nil && !lastActivity.IsZero() && clk.Now().Sub(lastActivity) > threshold {
+			// Resolve the smallest enabled threshold the session has actually
+			// crossed; skip the I/O-bound exemption probes entirely until at
+			// least one applicable threshold has elapsed. assignedThreshold only
+			// counts once we confirm ready-unclaimed assigned work below, so the
+			// initial gate uses whichever enabled threshold is smaller and then
+			// re-confirms which guard fired before recycling.
+			gateThreshold := progressThreshold
+			if assignedWorkStallApplies && (gateThreshold == 0 || assignedThreshold < gateThreshold) {
+				gateThreshold = assignedThreshold
+			}
+			if lastActivityErr == nil && !lastActivity.IsZero() && gateThreshold > 0 && clk.Now().Sub(lastActivity) > gateThreshold {
 				exempt := pendingInteractionKeepsAwake(*session, sp, name, clk) ||
 					pendingCreateStartInFlight(*session, clk, startupTimeout)
 				if !exempt {
@@ -1601,12 +1650,32 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 						exempt = true
 					}
 				}
+				// Ready, assigned, unclaimed work routed to this session that it
+				// has not started is the assigned-work-stall signal. It is checked
+				// before the min-floor exemption because a floor worker that DOES
+				// hold stalled assigned work is genuinely stuck — the "waiting for
+				// routed work" rationale for exempting floor workers no longer
+				// applies once that work has arrived and gone unstarted.
+				hasReadyUnclaimedAssignedWork := false
+				if !exempt && assignedWorkStallApplies && clk.Now().Sub(lastActivity) > assignedThreshold {
+					awake, awakeErr := sessionHasAwakeAssignedWorkForReachableStore(cityPath, cfg, store, rigStores, *session)
+					if awakeErr != nil {
+						// Fail safe: an unreadable assigned-work check must not, on
+						// its own, trigger a recycle. Leave the flag false; the
+						// general progress-stall path (if enabled) still governs.
+						fmt.Fprintf(stderr, "session reconciler: checking ready assigned work before assigned-work-stall recycle for %s: %v\n", name, awakeErr) //nolint:errcheck
+					} else {
+						hasReadyUnclaimedAssignedWork = awake
+					}
+				}
 				// Min-floor idle workers are legitimately unclaimed: they hold no
 				// bead because they are waiting for routed work to arrive, not
 				// because they parked on an error. Exempt them before the
 				// I/O-bound claim and provider-health checks so those queries
 				// are skipped entirely for floor workers every reconcile tick.
-				if !exempt && cfg != nil {
+				// A floor worker with stalled ready-unclaimed assigned work is NOT
+				// exempt — it is stuck, not idle-waiting.
+				if !exempt && !hasReadyUnclaimedAssignedWork && cfg != nil {
 					if cfgAgent := findAgentByTemplate(cfg, tp.TemplateName); cfgAgent != nil {
 						minFloor := cfgAgent.EffectiveMinActiveSessions()
 						if minFloor > 0 {
@@ -1651,12 +1720,37 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 						providerHealthy = h
 					}
 				}
-				if sessionProgressStalled(threshold, holdsClaim, providerHealthy, exempt, lastActivity, clk.Now()) {
+				// The assigned-work-stall guard fires when the session has crossed
+				// the (possibly default) assigned-work threshold AND holds ready,
+				// unclaimed assigned work. The general progress-stall guard fires
+				// only when its opt-in threshold is set and crossed. Both share the
+				// same attachment / claim / provider-health exemptions.
+				assignedStall := hasReadyUnclaimedAssignedWork &&
+					sessionProgressStalled(assignedThreshold, holdsClaim, providerHealthy, exempt, lastActivity, clk.Now())
+				generalStall := progressThreshold > 0 &&
+					sessionProgressStalled(progressThreshold, holdsClaim, providerHealthy, exempt, lastActivity, clk.Now())
+				if assignedStall || generalStall {
 					if session.Metadata == nil {
 						session.Metadata = map[string]string{}
 					}
 					session.Metadata["restart_requested"] = "true"
-					fmt.Fprintf(stderr, "session reconciler: %s progress-stalled (no progress for >%s, no open claim, provider healthy); requesting fresh restart\n", name, threshold) //nolint:errcheck
+					// assignedStall takes precedence in the diagnostic because its
+					// threshold is the tighter, on-by-default one; when both fire the
+					// assigned-work cause is the more actionable signal.
+					firedThreshold := progressThreshold
+					detail := "progress-stalled (no progress, no open claim, provider healthy)"
+					if assignedStall {
+						firedThreshold = assignedThreshold
+						detail = "assigned-work-stalled (ready assigned work unclaimed, no progress, provider healthy)"
+					}
+					if trace != nil {
+						trace.recordDecision(string(TraceSiteReconcilerProgressStall), tp.TemplateName, name, "progress_stall", "restart_requested", traceRecordPayload{
+							"assigned_work_stall": assignedStall,
+							"general_stall":       generalStall,
+							"threshold":           firedThreshold.String(),
+						}, nil, "")
+					}
+					fmt.Fprintf(stderr, "session reconciler: %s %s after >%s; requesting fresh restart\n", name, detail, firedThreshold) //nolint:errcheck
 				}
 			}
 		}

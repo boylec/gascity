@@ -2,8 +2,23 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
+
+// checkOffOrDuration validates a duration field that also accepts the literal
+// "off" sentinel (case-insensitive) as a disable switch. Empty is left to the
+// field's own default. Anything else must parse as a time.Duration.
+func checkOffOrDuration(context, field, value string, warnings *[]string, source string) {
+	if value == "" || strings.EqualFold(strings.TrimSpace(value), "off") {
+		return
+	}
+	if _, err := time.ParseDuration(strings.TrimSpace(value)); err != nil {
+		*warnings = append(*warnings, fmt.Sprintf(
+			"%s: %s %s = %q is not a valid duration or %q: %v",
+			source, context, field, value, "off", err))
+	}
+}
 
 // ValidateDurations checks all duration string fields in the config and returns
 // warnings for any values that cannot be parsed by time.ParseDuration. This
@@ -56,6 +71,7 @@ func ValidateDurations(cfg *City, source string) []string {
 	check("[session]", "nudge_lock_timeout", cfg.Session.NudgeLockTimeout)
 	check("[session]", "startup_timeout", cfg.Session.StartupTimeout)
 	check("[session]", "progress_stall_timeout", cfg.Session.ProgressStallTimeout)
+	checkOffOrDuration("[session]", "assigned_work_stall_timeout", cfg.Session.AssignedWorkStallTimeout, &warnings, source)
 
 	// Daemon config durations.
 	check("[daemon]", "patrol_interval", cfg.Daemon.PatrolInterval)
