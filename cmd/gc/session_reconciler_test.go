@@ -9269,6 +9269,28 @@ func TestResolveSessionCommand(t *testing.T) {
 			t.Errorf("got %q, want %q", got, want)
 		}
 	})
+
+	// Regression: a fresh-wake agent (wake_mode=fresh) whose provider has no
+	// SessionIDFlag must NOT resume. Resuming a long-gone provider session
+	// exits immediately and crash-loops the controller respawn (hq-357cs).
+	t.Run("fresh wake without SessionIDFlag does not resume", func(t *testing.T) {
+		noSessionID := &config.ResolvedProvider{ResumeFlag: "--resume"}
+		got := resolveSessionCommand("agent run", "key-1", noSessionID, false, true)
+		want := "agent run"
+		if got != want {
+			t.Errorf("got %q, want %q (must not append --resume on a fresh wake)", got, want)
+		}
+	})
+
+	// A fresh-wake agent with an explicit resume_command must also not resume.
+	t.Run("fresh wake without SessionIDFlag ignores resume_command", func(t *testing.T) {
+		noSessionID := &config.ResolvedProvider{ResumeCommand: "agent run --resume {{.SessionKey}}"}
+		got := resolveSessionCommand("agent run", "key-1", noSessionID, false, true)
+		want := "agent run"
+		if got != want {
+			t.Errorf("got %q, want %q (must not resume on a fresh wake)", got, want)
+		}
+	})
 }
 
 func TestDrainedIsKnownState(t *testing.T) {

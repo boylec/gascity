@@ -3937,9 +3937,25 @@ func silentRebaselineSessionHashes(session *beads.Bead, store beads.Store, agent
 // On a fresh provider start (first boot or wake_mode=fresh), it uses
 // SessionIDFlag to create a new provider conversation with the given key as
 // its ID. Otherwise it resumes the existing conversation.
+//
+// A forceFresh start (wake_mode=fresh) must NEVER resume: such agents are
+// configured to begin from a clean provider context on every wake, and their
+// prior provider session is routinely gone (slept/expired). Falling through to
+// --resume there resumes a non-existent conversation, which exits immediately
+// and makes the controller respawn the agent every reconcile tick — a
+// crash-loop (hq-357cs). So when forceFresh is set we use SessionIDFlag if the
+// provider has one, otherwise launch the bare command (a new conversation),
+// rather than resuming. firstStart without a SessionIDFlag retains its prior
+// fall-back-to-resume behavior, since the command may already encode resume
+// semantics for such providers.
 func resolveSessionCommand(command, sessionKey string, rp *config.ResolvedProvider, firstStart, forceFresh bool) string {
 	if (firstStart || forceFresh) && rp.SessionIDFlag != "" {
 		return command + " " + rp.SessionIDFlag + " " + sessionKey
+	}
+	if forceFresh {
+		// No SessionIDFlag to mint a keyed conversation; do not resume a
+		// fresh-wake agent. Launch the bare command for a new conversation.
+		return command
 	}
 	return resolveResumeCommand(command, sessionKey, rp)
 }
