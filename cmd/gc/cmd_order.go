@@ -995,6 +995,16 @@ func doOrderCheckWithStoresResolverScoped(cityPath string, cfg *config.City, aa 
 	return doOrderCheckWithStoresResolverScopedJSON(cityPath, cfg, aa, now, ep, resolveStores, false, stdout, stderr)
 }
 
+// suspendedRigNamesForOrderCheck returns the set of effectively-suspended rig
+// names for the `gc order check` paths. Returns an empty set when cfg is nil
+// (the city-less variant), so no order is treated as suspended there.
+func suspendedRigNamesForOrderCheck(cityPath string, cfg *config.City) map[string]bool {
+	if cfg == nil {
+		return map[string]bool{}
+	}
+	return buildEffectiveSuspendedRigNames(cfg, loadSuspensionStateBestEffort(cityPath))
+}
+
 func doOrderCheckWithStoresResolverScopedJSON(cityPath string, cfg *config.City, aa []orders.Order, now time.Time, ep events.Provider, resolveStores orderStoresResolver, jsonOutput bool, stdout, stderr io.Writer) int {
 	if len(aa) == 0 {
 		if jsonOutput {
@@ -1014,6 +1024,13 @@ func doOrderCheckWithStoresResolverScopedJSON(cityPath string, cfg *config.City,
 		return 1
 	}
 
+	// Orders targeting suspended rigs are never dispatched (the controller
+	// skips them), so evaluating their triggers here is pure cost. For an
+	// event-triggered order on a long-parked rig that cost is enumerating a
+	// frozen, ever-growing event backlog (hundreds of thousands of events).
+	// Report such orders as not-due/suspended without evaluating. (hq-flabi)
+	suspendedRigs := suspendedRigNamesForOrderCheck(cityPath, cfg)
+
 	if jsonOutput {
 		result := orderCheckJSON{
 			SchemaVersion: "1",
@@ -1025,6 +1042,17 @@ func doOrderCheckWithStoresResolverScopedJSON(cityPath string, cfg *config.City,
 			if err := validateOrderCheckPreflight(a); err != nil {
 				fmt.Fprintf(stderr, "gc order check: %v\n", err) //nolint:errcheck // best-effort stderr
 				return 1
+			}
+			if a.Rig != "" && suspendedRigs[a.Rig] {
+				result.Orders = append(result.Orders, orderCheckJSONRow{
+					Name:       a.Name,
+					Rig:        a.Rig,
+					ScopedName: a.ScopedName(),
+					Trigger:    a.Trigger,
+					Due:        false,
+					Reason:     "rig suspended",
+				})
+				continue
 			}
 			stores, err := resolveStores(a)
 			if err != nil {
@@ -1094,6 +1122,14 @@ func doOrderCheckWithStoresResolverScopedJSON(cityPath string, cfg *config.City,
 		if err := validateOrderCheckPreflight(a); err != nil {
 			fmt.Fprintf(stderr, "gc order check: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
+		}
+		if a.Rig != "" && suspendedRigs[a.Rig] {
+			if hasRig {
+				fmt.Fprintf(stdout, "%-20s %-12s %-15s %-5s %s\n", a.Name, a.Trigger, a.Rig, "no", "rig suspended") //nolint:errcheck
+			} else {
+				fmt.Fprintf(stdout, "%-20s %-12s %-5s %s\n", a.Name, a.Trigger, "no", "rig suspended") //nolint:errcheck
+			}
+			continue
 		}
 		stores, err := resolveStores(a)
 		if err != nil {

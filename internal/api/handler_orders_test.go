@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/events"
 	"github.com/gastownhall/gascity/internal/orders"
 )
 
@@ -487,6 +489,62 @@ func TestHandleOrderCheckTreatsWispFailedAsFailed(t *testing.T) {
 	}
 	if resp.Checks[0].LastRunOutcome == nil || *resp.Checks[0].LastRunOutcome != "failed" {
 		t.Fatalf("last_run_outcome = %v, want failed", resp.Checks[0].LastRunOutcome)
+	}
+}
+
+// TestHandleOrderCheckSkipsSuspendedRigOrder verifies that GET /orders/check
+// reports an event-triggered order on a suspended rig as not-due/"rig
+// suspended" without evaluating its trigger. Evaluating would enumerate the
+// rig's frozen event backlog (hundreds of thousands of events on a long-parked
+// rig) on every uncached request — the load source in hq-flabi. The controller
+// never dispatches suspended-rig orders, so reporting them due here would also
+// be misleading.
+func TestHandleOrderCheckSkipsSuspendedRigOrder(t *testing.T) {
+	fs := newFakeState(t)
+	fs.cfg.Rigs = []config.Rig{
+		{Name: "myrig", Path: "/tmp/myrig"},
+		{Name: "parked", Path: "/tmp/parked", SuspendedOnStart: true},
+	}
+	fs.autos = []orders.Order{
+		{Name: "nudge-on-route", Formula: "mol-nudge", Trigger: "event", On: events.BeadUpdated, Rig: "parked"},
+		{Name: "nudge-on-route", Formula: "mol-nudge", Trigger: "event", On: events.BeadUpdated, Rig: "myrig"},
+	}
+
+	h := newTestCityHandler(t, fs)
+	req := httptest.NewRequest(http.MethodGet, cityURL(fs, "/orders/check"), nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Checks []struct {
+			ScopedName string `json:"scoped_name"`
+			Rig        string `json:"rig"`
+			Due        bool   `json:"due"`
+			Reason     string `json:"reason"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	var sawParked bool
+	for _, c := range resp.Checks {
+		if c.Rig == "parked" {
+			sawParked = true
+			if c.Due {
+				t.Fatalf("suspended-rig order reported due: %+v", c)
+			}
+			if c.Reason != "rig suspended" {
+				t.Fatalf("suspended-rig order reason = %q, want %q", c.Reason, "rig suspended")
+			}
+		}
+	}
+	if !sawParked {
+		t.Fatalf("expected the suspended rig's order in the response; got %s", w.Body.String())
 	}
 }
 

@@ -846,6 +846,51 @@ func TestOrderCheckConditionUsesCityScope(t *testing.T) {
 	}
 }
 
+// TestOrderCheckSkipsSuspendedRigEventOrder verifies that `gc order check`
+// does NOT evaluate (enumerate the event backlog of) an event-triggered order
+// whose rig is suspended. The resolver below would FAIL loudly if reached; the
+// suspended-rig guard must short-circuit to a "rig suspended" row before any
+// store resolution or event enumeration. Regression for hq-flabi (suspended
+// rigs' frozen 200k+ event backlogs being enumerated on every check).
+func TestOrderCheckSkipsSuspendedRigEventOrder(t *testing.T) {
+	cityDir := t.TempDir()
+	cfg := &config.City{Rigs: []config.Rig{{Name: "frontend", SuspendedOnStart: true}}}
+
+	aa := []orders.Order{{
+		Name:    "nudge-on-route",
+		Rig:     "frontend",
+		Trigger: "event",
+		On:      events.BeadUpdated,
+		Formula: "mol-nudge",
+	}}
+	resolver := func(orders.Order) ([]beads.Store, error) {
+		t.Fatalf("resolveStores must not be called for a suspended rig's order")
+		return nil, nil
+	}
+
+	// JSON path.
+	var jstdout, jstderr bytes.Buffer
+	if code := doOrderCheckWithStoresResolverScopedJSON(cityDir, cfg, aa, time.Now(), events.NewFake(), resolver, true, &jstdout, &jstderr); code != 1 {
+		// none-due => exit 1 by the command's semantic-exit convention.
+		t.Fatalf("JSON doOrderCheck = %d, want 1 (none due); stderr: %s; stdout: %s", code, jstderr.String(), jstdout.String())
+	}
+	if !strings.Contains(jstdout.String(), "rig suspended") {
+		t.Fatalf("JSON output missing 'rig suspended' reason:\n%s", jstdout.String())
+	}
+	if strings.Contains(jstdout.String(), "\"due\":true") {
+		t.Fatalf("suspended-rig order must not be due:\n%s", jstdout.String())
+	}
+
+	// Text path.
+	var tstdout, tstderr bytes.Buffer
+	if code := doOrderCheckWithStoresResolverScoped(cityDir, cfg, aa, time.Now(), events.NewFake(), resolver, &tstdout, &tstderr); code != 1 {
+		t.Fatalf("text doOrderCheck = %d, want 1 (none due); stderr: %s; stdout: %s", code, tstderr.String(), tstdout.String())
+	}
+	if !strings.Contains(tstdout.String(), "rig suspended") {
+		t.Fatalf("text output missing 'rig suspended' reason:\n%s", tstdout.String())
+	}
+}
+
 func TestOrderCheckWithStoresResolverFailsWhenLegacyEventCursorReadFails(t *testing.T) {
 	rigStore := beads.NewMemStore()
 	legacyStore := labelFailListStore{

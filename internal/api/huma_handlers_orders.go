@@ -11,8 +11,11 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/events"
+	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/orders"
+	"github.com/gastownhall/gascity/internal/suspensionstate"
 )
 
 // OrderListBody is the response body for GET /v0/orders.
@@ -79,9 +82,27 @@ func (s *Server) humaHandleOrderCheck(_ context.Context, input *OrderCheckInput)
 		}
 	}
 
+	// Suspended-rig orders are never dispatched (the controller skips them),
+	// so evaluating their triggers here is pure cost — and for event-triggered
+	// orders on a long-parked rig that cost is enumerating a frozen,
+	// ever-growing event backlog (hundreds of thousands of events) on every
+	// uncached request. Report them as not-due/suspended without enumerating.
+	// (hq-flabi)
+	suspendedRigs := suspendedRigSet(s.state.Config(), s.state.CityPath())
+
 	now := time.Now()
 	checks := make([]orderCheckResponse, 0, len(aa))
 	for _, a := range aa {
+		if a.Rig != "" && suspendedRigs[a.Rig] {
+			checks = append(checks, orderCheckResponse{
+				Name:       a.Name,
+				ScopedName: a.ScopedName(),
+				Rig:        a.Rig,
+				Due:        false,
+				Reason:     "rig suspended",
+			})
+			continue
+		}
 		storeInfos, err := orderStoreInfosForState(s.state, a)
 		if err != nil {
 			storeInfos = nil
@@ -118,6 +139,24 @@ func (s *Server) humaHandleOrderCheck(_ context.Context, input *OrderCheckInput)
 		s.storeResponse(cacheKey, index, out.Body)
 	}
 	return out, nil
+}
+
+// suspendedRigSet returns the set of rig names that are effectively suspended,
+// loaded once per call. Mirrors the resolution used by buildStatusBody and the
+// controller's order dispatcher so all three agree on which rigs are parked.
+func suspendedRigSet(cfg *config.City, cityPath string) map[string]bool {
+	out := make(map[string]bool)
+	if cfg == nil {
+		return out
+	}
+	citySt, _ := suspensionstate.Load(fsys.OSFS{}, cityPath)
+	for i := range cfg.Rigs {
+		r := &cfg.Rigs[i]
+		if suspensionstate.EffectiveRigSuspended(citySt, r.Name, r.EffectiveSuspendedOnStart()) {
+			out[r.Name] = true
+		}
+	}
+	return out
 }
 
 func hasConditionOrder(aa []orders.Order) bool {
