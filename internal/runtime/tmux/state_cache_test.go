@@ -439,6 +439,156 @@ func TestStateCache_StaleTTLReturnsFalseForAllSessions(t *testing.T) {
 	}
 }
 
+// TestStateCache_DegradedRefreshRetainsRosterPastStaleTTL is the regression
+// guard for hq-tb3p95: when refreshes keep failing because the OS probe is
+// SIGKILLed under load (a "signal: killed" / context-deadline failure), the
+// last-known-good roster must be RETAINED past staleTTL. Collapsing it would
+// drop live sessions, letting orphan-recovery reset a bead an agent is working
+// and letting the reconciler double-dispatch a worktree (hq-w3c0dk).
+func TestStateCache_DegradedRefreshRetainsRosterPastStaleTTL(t *testing.T) {
+	f := &mockFetcher{
+		sessions: map[string]bool{"agent-1": true},
+	}
+	ttl := 50 * time.Millisecond
+	cache := NewStateCache(f, ttl)
+	cache.staleTTL = 100 * time.Millisecond // short staleTTL for testing
+
+	// Prime the cache with a good snapshot.
+	if !cache.IsRunning("agent-1") {
+		t.Fatal("expected agent-1 running initially")
+	}
+
+	// Now every refresh fails the way a SIGKILLed `ps` scan does under load.
+	f.setResult(nil, fmt.Errorf("fetching Darwin process command snapshot: %w",
+		errors.New("signal: killed")))
+
+	// Wait well past staleTTL with continuous degraded failures.
+	time.Sleep(250 * time.Millisecond)
+
+	// The session is still tmux-live as far as we last knew; a killed probe is
+	// "unknown", not "dead". The roster MUST be retained.
+	if !cache.IsRunning("agent-1") {
+		t.Error("agent-1 dropped from roster under a degraded (killed) refresh — false-orphan risk (hq-tb3p95)")
+	}
+
+	cache.mu.RLock()
+	degraded := cache.lastRefreshDegraded
+	cache.mu.RUnlock()
+	if !degraded {
+		t.Error("expected lastRefreshDegraded=true after a killed-probe refresh failure")
+	}
+
+	// A subsequent successful refresh must re-establish ground truth: if tmux
+	// now reports the session gone, it is dropped and the degraded flag clears.
+	f.setResult(map[string]bool{}, nil)
+	cache.Invalidate() // force the next read to refresh
+	if cache.IsRunning("agent-1") {
+		t.Error("agent-1 should be gone after an authoritative empty refresh")
+	}
+	cache.mu.RLock()
+	degraded = cache.lastRefreshDegraded
+	cache.mu.RUnlock()
+	if degraded {
+		t.Error("lastRefreshDegraded should clear after a successful refresh")
+	}
+}
+
+// TestStateCache_AuthoritativeFailureStillCollapses asserts the staleTTL safety
+// net is intact for NON-degraded failures: if the failure is not a killed/timed
+// -out probe (e.g. a genuine tmux fault), the roster still collapses after
+// staleTTL so the cache never serves indefinitely-stale data on a real outage.
+func TestStateCache_AuthoritativeFailureStillCollapses(t *testing.T) {
+	f := &mockFetcher{
+		sessions: map[string]bool{"agent-1": true},
+	}
+	ttl := 50 * time.Millisecond
+	cache := NewStateCache(f, ttl)
+	cache.staleTTL = 100 * time.Millisecond
+
+	if !cache.IsRunning("agent-1") {
+		t.Fatal("expected agent-1 running initially")
+	}
+
+	// A plain (authoritative, non-killed) failure.
+	f.setResult(nil, errors.New("tmux internal error"))
+	time.Sleep(250 * time.Millisecond)
+
+	if cache.IsRunning("agent-1") {
+		t.Error("expected agent-1 to collapse after staleTTL on a non-degraded failure")
+	}
+}
+
+func TestIsDegradedFetchError(t *testing.T) {
+	bg := context.Background()
+	cancelled, cancel := context.WithCancel(bg)
+	cancel()
+
+	cases := []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want bool
+	}{
+		{"nil error", bg, nil, false},
+		{"signal killed string", bg, errors.New("signal: killed"), true},
+		{"wrapped signal killed", bg, fmt.Errorf("fetching Darwin process command snapshot: %w", errors.New("signal: killed")), true},
+		{"signal terminated", bg, errors.New("signal: terminated"), true},
+		{"deadline exceeded", bg, context.DeadlineExceeded, true},
+		{"context canceled via err", bg, context.Canceled, true},
+		{"cancelled ctx with generic err", cancelled, errors.New("boom"), true},
+		{"authoritative generic error", bg, errors.New("tmux internal error"), false},
+		{"no server", bg, ErrNoServer, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isDegradedFetchError(tc.ctx, tc.err); got != tc.want {
+				t.Errorf("isDegradedFetchError(%v) = %t, want %t", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseDarwinProcessSnapshot_ArgsOnlyFallback covers the partial-failure
+// path: when the comm snapshot is SIGKILLed but the args snapshot succeeds, the
+// process table is still built from args alone (Command derived from argv[0]),
+// rather than the whole scan being discarded (hq-tb3p95 / hq-w3c0dk reap path).
+func TestParseDarwinProcessSnapshot_ArgsOnlyFallback(t *testing.T) {
+	argsOut := "  101     1 /bin/bash -lc claude\n  102   101 /usr/local/bin/node /usr/local/bin/claude\n"
+	snap := parseDarwinProcessSnapshot(argsOut, "") // empty comm = killed/partial
+
+	if _, ok := snap.byPID["101"]; !ok {
+		t.Fatal("expected PID 101 present from args-only snapshot")
+	}
+	proc := snap.byPID["102"]
+	if proc.Command != "node" {
+		t.Errorf("Command = %q, want %q (derived from argv[0])", proc.Command, "node")
+	}
+	// Descendant matching must still work off the args column.
+	names := processNameSet([]string{"claude"})
+	if !snap.hasDescendantWithNames("101", names, 0) {
+		t.Error("expected claude descendant to match from args-only snapshot")
+	}
+}
+
+func TestFetchTimeoutFromEnv(t *testing.T) {
+	t.Setenv("GC_TMUX_FETCH_TIMEOUT", "")
+	if got := fetchTimeoutFromEnv(); got != defaultFetchTimeout {
+		t.Errorf("unset = %v, want default %v", got, defaultFetchTimeout)
+	}
+	t.Setenv("GC_TMUX_FETCH_TIMEOUT", "12s")
+	if got := fetchTimeoutFromEnv(); got != 12*time.Second {
+		t.Errorf("12s = %v, want 12s", got)
+	}
+	t.Setenv("GC_TMUX_FETCH_TIMEOUT", "1500")
+	if got := fetchTimeoutFromEnv(); got != 1500*time.Millisecond {
+		t.Errorf("1500 = %v, want 1.5s", got)
+	}
+	t.Setenv("GC_TMUX_FETCH_TIMEOUT", "garbage")
+	if got := fetchTimeoutFromEnv(); got != defaultFetchTimeout {
+		t.Errorf("garbage = %v, want default %v", got, defaultFetchTimeout)
+	}
+}
+
 func TestStateCache_EmptySessionsMap(t *testing.T) {
 	f := &mockFetcher{
 		sessions: map[string]bool{},

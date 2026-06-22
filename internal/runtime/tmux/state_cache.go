@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -23,10 +24,31 @@ const defaultCacheTTL = 2 * time.Second
 // defaultStaleTTL is the maximum age of cached data before it is considered
 // too stale to trust. After this duration, IsRunning returns false for all
 // sessions and logs a degraded warning.
+//
+// This collapse only applies to data that is stale for an UNKNOWN reason. A
+// snapshot that is merely failing to refresh because the OS `ps`/tmux probe is
+// being SIGKILLed under fleet load is degraded, not authoritatively dead, and
+// must NOT collapse here — doing so drops live sessions from the roster and
+// lets orphan-recovery reset beads an agent is actively working (hq-tb3p95).
+// See lastRefreshDegraded.
 const defaultStaleTTL = 30 * time.Second
 
-// fetchTimeout is the hard timeout for a single runtime-state fetch.
-const fetchTimeout = 3 * time.Second
+// defaultFetchTimeout is the default hard timeout for a single runtime-state
+// fetch (one tmux list-panes plus one full-OS process-table scan).
+//
+// The full-OS `ps -e` scan competes with a busy/wedged fleet for CPU; at 3s it
+// routinely lost the race and was SIGKILLed (`signal: killed`), starving the
+// control plane (hq-tb3p95, hq-w3c0dk, hq-9s2ni). 8s gives the scan room
+// without letting a genuinely wedged probe hang the caller. Override with
+// GC_TMUX_FETCH_TIMEOUT (Go duration or integer milliseconds).
+const defaultFetchTimeout = 8 * time.Second
+
+// listPanesTimeout bounds the cheap, authoritative tmux list-panes call. It is
+// carved out of the fetch budget so a slow full-OS process scan can never
+// starve the call that actually establishes session liveness. A list-panes
+// that exceeds this is treated as a degraded refresh (unknown, keep
+// last-known-good), never as "no sessions".
+const listPanesTimeout = 2 * time.Second
 
 // StateFetcher abstracts tmux subprocess calls for testability.
 type StateFetcher interface {
@@ -75,25 +97,34 @@ type runtimeStateSnapshot struct {
 // status check or reconciler pass. Concurrent callers are coalesced via
 // singleflight so at most one tmux/process snapshot refresh runs at a time.
 type StateCache struct {
-	mu         sync.RWMutex
-	state      runtimeStateSnapshot
-	fetchedAt  time.Time
-	lastError  error
-	dirty      bool   // set by Invalidate(); cleared on successful refresh
-	generation uint64 // advanced by invalidation/eviction to reject stale refreshes
-	ttl        time.Duration
-	staleTTL   time.Duration
-	sf         singleflight.Group
-	fetcher    StateFetcher
+	mu        sync.RWMutex
+	state     runtimeStateSnapshot
+	fetchedAt time.Time
+	lastError error
+	dirty     bool // set by Invalidate(); cleared on successful refresh
+	// lastRefreshDegraded is true when the most recent refresh failed because
+	// the OS probe was killed/timed out (a transient, load-induced failure)
+	// rather than returning an authoritative result. While degraded, the
+	// last-known-good roster is retained past staleTTL: a SIGKILLed snapshot is
+	// "unknown", and unknown must never be reported as "session dead". Cleared
+	// on any successful refresh. See refresh / currentState.
+	lastRefreshDegraded bool
+	generation          uint64 // advanced by invalidation/eviction to reject stale refreshes
+	ttl                 time.Duration
+	staleTTL            time.Duration
+	fetchTimeout        time.Duration
+	sf                  singleflight.Group
+	fetcher             StateFetcher
 }
 
 // NewStateCache creates a new cache with the given fetcher and TTL.
-// staleTTL defaults to 30s.
+// staleTTL defaults to 30s and fetchTimeout to defaultFetchTimeout.
 func NewStateCache(fetcher StateFetcher, ttl time.Duration) *StateCache {
 	return &StateCache{
-		fetcher:  fetcher,
-		ttl:      ttl,
-		staleTTL: defaultStaleTTL,
+		fetcher:      fetcher,
+		ttl:          ttl,
+		staleTTL:     defaultStaleTTL,
+		fetchTimeout: fetchTimeoutFromEnv(),
 	}
 }
 
@@ -140,12 +171,27 @@ func (c *StateCache) currentState() runtimeStateSnapshot {
 	c.mu.RLock()
 	state = c.state
 	fetchedAt = c.fetchedAt
+	degraded := c.lastRefreshDegraded
 	c.mu.RUnlock()
 
-	// If the cache is older than staleTTL, report all sessions as not running.
-	// Note: fetchedAt is preserved on failure (never zeroed), so this only
-	// triggers after staleTTL of real wall-clock time since last success.
-	if state.Sessions == nil || fetchedAt.IsZero() || time.Since(fetchedAt) > c.staleTTL {
+	// We have never had a good snapshot — nothing to report.
+	if state.Sessions == nil || fetchedAt.IsZero() {
+		return runtimeStateSnapshot{}
+	}
+
+	// If the cache is older than staleTTL, report all sessions as not running —
+	// UNLESS the staleness is purely because refreshes keep getting SIGKILLed
+	// under load (degraded). A killed snapshot is "unknown", not "dead":
+	// collapsing it here drops tmux-live sessions from the roster, which lets
+	// orphan-recovery reset a bead an agent is actively working (hq-tb3p95) and
+	// lets the reconciler double-dispatch a worktree it can no longer see is
+	// occupied (hq-w3c0dk). Retain the last-known-good roster while degraded;
+	// the next successful refresh re-establishes ground truth and clears the
+	// flag. Note: fetchedAt is preserved on failure (never zeroed), so the
+	// non-degraded branch still collapses after staleTTL of a real outage (e.g.
+	// the tmux server is genuinely gone, which surfaces as an authoritative
+	// empty/no-server result, not a degraded one).
+	if time.Since(fetchedAt) > c.staleTTL && !degraded {
 		return runtimeStateSnapshot{}
 	}
 	return state
@@ -176,6 +222,10 @@ func (c *StateCache) EvictSession(name string) {
 // last-known-good cache is preserved and the error is logged.
 func (c *StateCache) refresh() {
 	_, _, _ = c.sf.Do("refresh", func() (interface{}, error) {
+		fetchTimeout := c.fetchTimeout
+		if fetchTimeout <= 0 {
+			fetchTimeout = defaultFetchTimeout
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
 
@@ -188,9 +238,16 @@ func (c *StateCache) refresh() {
 		elapsed := time.Since(start)
 
 		if err != nil {
-			log.Printf("tmux state cache: refresh failed in %v: %v", elapsed, err)
+			// A timed-out/SIGKILLed probe is a degraded (transient) failure, not
+			// an authoritative "no sessions" — retain last-known-good past
+			// staleTTL rather than collapsing the roster (hq-tb3p95). Any other
+			// error is treated as authoritative and is allowed to go stale
+			// normally.
+			degraded := isDegradedFetchError(ctx, err)
+			log.Printf("tmux state cache: refresh failed in %v (degraded=%t): %v", elapsed, degraded, err)
 			c.mu.Lock()
 			c.lastError = err
+			c.lastRefreshDegraded = degraded
 			c.mu.Unlock()
 			// Preserve last-known-good — do NOT update fetchedAt or sessions.
 			return nil, err
@@ -213,6 +270,7 @@ func (c *StateCache) refresh() {
 		c.state = state
 		c.fetchedAt = time.Now()
 		c.lastError = nil
+		c.lastRefreshDegraded = false
 		c.dirty = false
 		c.mu.Unlock()
 		return nil, nil
@@ -228,7 +286,14 @@ type tmuxFetcher struct {
 // Sessions where remain-on-exit has kept a dead pane (pane_dead=1) are
 // excluded — they represent exited processes, not running ones.
 func (f *tmuxFetcher) FetchState(ctx context.Context) (runtimeStateSnapshot, error) {
-	out, err := f.tm.runCtx(ctx, "list-panes", "-a", "-F", "#{session_name}\t#{pane_dead}\t#{pane_current_command}\t#{pane_pid}")
+	// Bound the authoritative list-panes call to its own short sub-deadline so a
+	// slow full-OS process scan can never starve it. "no server" stays
+	// authoritative (genuinely no sessions); any other failure — including a
+	// list-panes timeout under load — propagates so the cache retains
+	// last-known-good rather than collapsing the roster (hq-tb3p95).
+	listCtx, cancel := context.WithTimeout(ctx, listPanesTimeout)
+	defer cancel()
+	out, err := f.tm.runCtx(listCtx, "list-panes", "-a", "-F", "#{session_name}\t#{pane_dead}\t#{pane_current_command}\t#{pane_pid}")
 	if err != nil {
 		if isNoServerError(err) {
 			return runtimeStateSnapshot{Sessions: map[string]sessionRuntimeState{}}, nil // No server = no sessions
@@ -425,13 +490,22 @@ func fetchProcessSnapshot(ctx context.Context) (processSnapshot, error) {
 }
 
 func fetchDarwinProcessSnapshot(ctx context.Context) (processSnapshot, error) {
+	// The args snapshot is authoritative for process identity: argv[0] yields a
+	// usable Command and the full argv drives interpreter/descendant matching.
+	// If it fails (e.g. SIGKILLed under load) we cannot build a snapshot.
 	argsOut, err := exec.CommandContext(ctx, "ps", processSnapshotPSArgs()...).Output()
 	if err != nil {
 		return processSnapshot{}, fmt.Errorf("fetching Darwin process args snapshot: %w", err)
 	}
+	// The comm snapshot only refines Command for processes whose argv[0] is an
+	// indirect launcher. If the second `ps` loses the CPU race and is killed,
+	// fall back to the args-only snapshot instead of discarding the whole scan —
+	// a partial process table is strictly better than forcing the caller to
+	// degrade to "processes unavailable" (hq-tb3p95 / hq-w3c0dk reap path).
 	commOut, err := exec.CommandContext(ctx, "ps", darwinCommandSnapshotPSArgs()...).Output()
 	if err != nil {
-		return processSnapshot{}, fmt.Errorf("fetching Darwin process command snapshot: %w", err)
+		log.Printf("tmux state cache: Darwin comm snapshot degraded, using args-only process table: %v", err)
+		return parseDarwinProcessSnapshot(string(argsOut), ""), nil
 	}
 	return parseDarwinProcessSnapshot(string(argsOut), string(commOut)), nil
 }
@@ -641,15 +715,61 @@ func isNoServerError(err error) bool {
 	return errors.Is(err, ErrNoServer) || (err != nil && strings.Contains(err.Error(), "no server running"))
 }
 
+// isDegradedFetchError reports whether a FetchState failure is a transient,
+// load-induced probe failure (the fetch context expired, or a child `ps`/tmux
+// process was SIGKILLed when its context was cancelled) rather than an
+// authoritative result. A degraded failure means the snapshot is "unknown" and
+// the last-known-good roster must be retained past staleTTL instead of
+// collapsing — a killed probe must never be read as "session dead"
+// (hq-tb3p95 / hq-w3c0dk / hq-9s2ni).
+func isDegradedFetchError(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	// The parent fetch deadline elapsed, or a child process was killed because
+	// its context was cancelled mid-scan.
+	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	// os/exec surfaces a context-driven kill as the process being signalled;
+	// the user-visible symptom in the field is "signal: killed". Detect both the
+	// structured ExitError (signalled, not a clean non-zero exit) and the string
+	// form so wrapped errors from FetchState are still classified correctly.
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+			return true
+		}
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "signal: killed") || strings.Contains(msg, "signal: terminated")
+}
+
 // cacheTTLFromEnv reads GC_TMUX_CACHE_TTL from the environment and parses
 // it as a duration. Returns defaultCacheTTL if the env var is unset, empty,
 // or cannot be parsed. Accepts:
 //   - integer: interpreted as milliseconds (e.g., "2000" = 2s)
 //   - Go duration string: (e.g., "2s", "500ms")
 func cacheTTLFromEnv() time.Duration {
-	v := os.Getenv("GC_TMUX_CACHE_TTL")
+	return durationFromEnv("GC_TMUX_CACHE_TTL", defaultCacheTTL)
+}
+
+// fetchTimeoutFromEnv reads GC_TMUX_FETCH_TIMEOUT and parses it as a duration,
+// falling back to defaultFetchTimeout. Operators on a heavily loaded host can
+// raise this so the full-OS `ps` scan does not get SIGKILLed mid-refresh; the
+// session-drop fix (hq-tb3p95) keeps a killed scan from dropping live sessions
+// regardless, but a longer timeout reduces how often the degraded path is hit.
+// Accepts the same forms as cacheTTLFromEnv (Go duration or integer ms).
+func fetchTimeoutFromEnv() time.Duration {
+	return durationFromEnv("GC_TMUX_FETCH_TIMEOUT", defaultFetchTimeout)
+}
+
+// durationFromEnv parses an env var as a Go duration string, or as integer
+// milliseconds, returning fallback when unset, empty, or unparseable.
+func durationFromEnv(key string, fallback time.Duration) time.Duration {
+	v := os.Getenv(key)
 	if v == "" {
-		return defaultCacheTTL
+		return fallback
 	}
 
 	// Try Go duration string first (e.g., "2s", "500ms").
@@ -664,6 +784,6 @@ func cacheTTLFromEnv() time.Duration {
 		}
 	}
 
-	log.Printf("tmux state cache: invalid GC_TMUX_CACHE_TTL=%q, using default %v", v, defaultCacheTTL)
-	return defaultCacheTTL
+	log.Printf("tmux state cache: invalid %s=%q, using default %v", key, v, fallback)
+	return fallback
 }
