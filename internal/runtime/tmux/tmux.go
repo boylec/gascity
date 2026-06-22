@@ -1608,6 +1608,114 @@ func (t *Tmux) sendKeysLiteralWithRetry(target, text string, timeout time.Durati
 	return fmt.Errorf("agent not ready for input after %s: %w", timeout, lastErr)
 }
 
+const (
+	// submitVerifyAttempts is how many times submitWithVerify re-sends Enter
+	// when the pasted nudge is still sitting unsubmitted in the input box.
+	// The first nudge after a limit prompt / startup dialog is the documented
+	// failure case (hq-hyb6h): tmux delivers Enter with no error, but Claude's
+	// input widget eats it and the instruction stays visible-but-unsubmitted.
+	// A second Enter almost always lands, so a small bounded retry suffices.
+	submitVerifyAttempts = 3
+	// submitVerifySettleMs is how long to wait after each Enter before
+	// re-capturing the pane to decide whether the submit registered. Claude
+	// clears the input box and starts rendering its turn within this window.
+	submitVerifySettleMs = 400
+)
+
+// inputPromptGlyphs are the leading glyphs the supported TUIs draw on the
+// editable prompt line: ❯ (Claude / powerline), › (Codex), > (Gemini ASCII).
+// They mirror the prompt-readiness detector in runtime/dialog.go; a line that
+// begins with one of these (after any box border) is the input box, not
+// transcript output (submitted messages are prefixed with ●).
+var inputPromptGlyphs = []string{"❯", "›", ">"}
+
+// nudgeStillPending reports whether the text we pasted is still sitting in the
+// session's input box (i.e. the submit Enter was dropped). It captures the
+// pane tail and looks for a non-trivial line of the pasted message on an input
+// prompt line. Capture failures and empty/whitespace messages return false:
+// we only re-submit on positive evidence the text is stuck, never on a guess.
+func (t *Tmux) nudgeStillPending(target, message string) bool {
+	needle := lastSubstantialLine(message)
+	if needle == "" {
+		return false
+	}
+	paneText, err := t.CapturePane(target, 12)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(paneText, "\n") {
+		// Normalize NBSP→space and strip a leading box-drawing border so a
+		// glyph rendered inside a bordered input box (grok "│ ❯ …", boxed
+		// gemini "│ > …") is recognized, matching containsPromptIndicator.
+		trimmed := strings.TrimSpace(strings.ReplaceAll(line, " ", " "))
+		trimmed = stripLeadingBoxBorder(trimmed)
+		if trimmed == "" {
+			continue
+		}
+		for _, glyph := range inputPromptGlyphs {
+			rest, ok := strings.CutPrefix(trimmed, glyph+" ")
+			if ok && strings.Contains(rest, needle) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// lastSubstantialLine returns the last non-blank line of message that is long
+// enough to match unambiguously against pane output (short fragments like ">"
+// would false-positive on the empty prompt itself). Returns "" when no such
+// line exists.
+func lastSubstantialLine(message string) string {
+	lines := strings.Split(message, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if len(trimmed) >= 4 {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+// submitWithVerify sends Enter to submit a pasted nudge, then verifies the
+// input box actually cleared. tmux returning no error means the bytes were
+// delivered, NOT that Claude consumed the Enter — the documented hq-hyb6h
+// stall is a dropped submit with no error anywhere. So after each Enter we
+// capture the pane and, if the pasted text is still parked in the input box,
+// wake the pane and re-send Enter, up to submitVerifyAttempts.
+//
+// session is the session name used for WakePaneIfDetached (which keys on the
+// session, not a pane id); target is where keys are sent (a pane id in
+// multi-pane sessions, otherwise the session name).
+func (t *Tmux) submitWithVerify(session, target, message string) error {
+	var lastErr error
+	for attempt := 0; attempt < submitVerifyAttempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(200 * time.Millisecond)
+		}
+		if _, err := t.run("send-keys", "-t", target, "Enter"); err != nil {
+			lastErr = err
+			continue
+		}
+		// Wake so the submitted turn is processed promptly. A detached pane
+		// can accept the Enter byte but stall its event loop until SIGWINCH.
+		t.WakePaneIfDetached(session)
+
+		// Give Claude a moment to clear the input box and start its turn,
+		// then confirm the submit actually took. If the text is gone, we're
+		// done; if it's still parked, loop and re-send Enter.
+		time.Sleep(submitVerifySettleMs * time.Millisecond)
+		if !t.nudgeStillPending(target, message) {
+			return nil
+		}
+		lastErr = fmt.Errorf("nudge text still unsubmitted after Enter (attempt %d)", attempt+1)
+	}
+	if lastErr == nil {
+		return nil
+	}
+	return fmt.Errorf("failed to submit nudge after %d attempts: %w", submitVerifyAttempts, lastErr)
+}
+
 // NudgeSession sends a message to a Claude Code session reliably.
 // This is the canonical way to send messages to Claude sessions.
 // Uses: literal mode + 500ms debounce + separate Enter.
@@ -1667,21 +1775,11 @@ func (t *Tmux) NudgeSession(session, message string) error {
 	// detached but drop the submit key until a terminal resize wakes their loop.
 	t.WakePaneIfDetached(session)
 
-	// 5. Send Enter with retry (critical for message submission)
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			time.Sleep(200 * time.Millisecond)
-		}
-		if _, err := t.run("send-keys", "-t", target, "Enter"); err != nil {
-			lastErr = err
-			continue
-		}
-		// 6. Wake again so the submitted turn is processed promptly.
-		t.WakePaneIfDetached(session)
-		return nil
-	}
-	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+	// 5. Submit with verify-after-send. A bare send-keys Enter can be dropped
+	// by Claude's input widget with no tmux error (hq-hyb6h), leaving the
+	// nudge visible-but-unsubmitted; submitWithVerify re-sends until the input
+	// box clears.
+	return t.submitWithVerify(session, target, message)
 }
 
 // NudgePane sends a message to a specific pane reliably.
@@ -1714,21 +1812,10 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	// happens before and after submit.
 	t.WakePaneIfDetached(pane)
 
-	// 5. Send Enter with retry (critical for message submission)
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			time.Sleep(200 * time.Millisecond)
-		}
-		if _, err := t.run("send-keys", "-t", pane, "Enter"); err != nil {
-			lastErr = err
-			continue
-		}
-		// 6. Wake again so the submitted turn is processed promptly.
-		t.WakePaneIfDetached(pane)
-		return nil
-	}
-	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+	// 5. Submit with verify-after-send. See NudgeSession: a dropped Enter
+	// produces no tmux error, so submitWithVerify confirms the input box
+	// cleared and re-sends if the nudge is still parked unsubmitted.
+	return t.submitWithVerify(pane, pane, message)
 }
 
 func (t *Tmux) shouldSendEscapeBeforeEnter(target string) bool {
