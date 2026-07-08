@@ -105,6 +105,12 @@ func validateWorkRecordOnClose(bead beads.Bead, commitReachable func(commit, bra
 // repo, unknown ref, unknown commit — reads as "not reachable". A commit/branch
 // that looks like a flag (leading "-") is rejected outright so a malformed
 // metadata value can never be parsed as a git option.
+//
+// The gate is called after a polecat has drained and the refinery has merged,
+// so the reachability check runs in the bd scope clone (e.g.,
+// ~/src/BlueScroll/vessel-network) which may lag origin. When the local check
+// fails, fetch from origin and re-check against the remote-tracking ref
+// (origin/<branch>) so freshly merged commits are not falsely flagged.
 func gitCommitReachableOnBranch(repoDir, commit, branch string) bool {
 	if strings.TrimSpace(repoDir) == "" || commit == "" || branch == "" {
 		return false
@@ -112,7 +118,15 @@ func gitCommitReachableOnBranch(repoDir, commit, branch string) bool {
 	if strings.HasPrefix(commit, "-") || strings.HasPrefix(branch, "-") {
 		return false
 	}
-	return exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", commit, branch).Run() == nil
+	// Fast path: check local branch without a network round-trip.
+	if exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", commit, branch).Run() == nil {
+		return true
+	}
+	// Local clone may be stale. Fetch origin/<branch> and re-check against the
+	// remote-tracking ref so commits merged since the last local pull are visible.
+	// Best-effort: ignore fetch errors (offline, no remote configured, etc.).
+	_ = exec.Command("git", "-C", repoDir, "fetch", "origin", branch).Run()
+	return exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", commit, "origin/"+branch).Run() == nil
 }
 
 // workRecordCloseTargets returns the bead IDs a bd invocation closes, and
